@@ -1,0 +1,4 @@
+pandas
+tkcalendar
+matplotlib
+# Tkinter comes with Python standard library (no need to install)
