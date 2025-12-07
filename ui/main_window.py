@@ -45,16 +45,18 @@ class RecordBook:
         # 导入菜单
         import_menu = tk.Menu(menubar, tearoff=0)
         import_menu.add_command(label='CSV', command=self.import_csv)
+        import_menu.add_command(label='导入支付宝账单', command=self.import_alipay_csv)
+        import_menu.add_command(label='导入微信账单', command=self.import_wechat_excel)
         menubar.add_cascade(label='导入', menu=import_menu)
         # 导出菜单
         export_menu = tk.Menu(menubar, tearoff=0)
         export_menu.add_command(label='CSV', command=self.export_csv)
         menubar.add_cascade(label='导出', menu=export_menu)
-        # 新增筛选菜单
+        # 筛选菜单
         filter_menu = tk.Menu(menubar, tearoff=0)
         filter_menu.add_command(label='筛选账单', command=self.open_filter_dialog)
         menubar.add_cascade(label='筛选', menu=filter_menu)
-        # 新增统计菜单
+        # 统计菜单
         stat_menu = tk.Menu(menubar, tearoff=0)
         stat_menu.add_command(label='月度账单', command=self.show_monthly_bill)
         # 统计图表二级菜单
@@ -212,8 +214,89 @@ class RecordBook:
                 messagebox.showerror('映射错误', '请为所有字段选择对应的列')
                 return
             df = df.rename(columns={v: k for k, v in col_map.items()})
+            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
             # 日期格式化
             df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            
+            # 弹出预览对话框
+            preview_df = df[['日期', '类型', '分类', '金额', '备注']]
+            preview_dialog = PreviewDialog(self.master, preview_df, self.default_font)
+            self.master.wait_window(preview_dialog)
+            
+            # 如果用户确认导入，才进行实际导入
+            if preview_dialog.result:
+                self.data = pd.concat([self.data, preview_df], ignore_index=True)
+                self.dirty = True
+                self.refresh_table()
+                messagebox.showinfo('导入成功', f'已导入 {len(df)} 条账单')
+            else:
+                messagebox.showinfo('取消导入', '已取消导入操作')
+        except Exception as e:
+            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
+
+    def import_alipay_csv(self):
+        file_path = filedialog.askopenfilename(title='选择支付宝账单CSV文件', filetypes=[('CSV文件', '*.csv')])
+        print(file_path)
+        if not file_path:
+            return
+        try:
+            # 支付宝账单前24行为说明，从第25行开始为数据
+            # 支付宝账单，编码格式为gbk
+            df = pd.read_csv(file_path, encoding='gbk', skiprows=24, usecols=range(7))
+            columns = list(df.columns)
+            # 尝试自动推测映射（优先中文字段）
+            default_map = {}
+            for std, alipay in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易分类','金额','商品说明']):
+                if alipay in columns:
+                    default_map[std] = alipay
+            # 兼容英文账单
+            alt_map = {'日期':'Date','类型':'In/Out','分类':'Product','金额':'Amount(¥)','备注':'Remark'}
+            for std, alt in alt_map.items():
+                if std not in default_map and alt in columns:
+                    default_map[std] = alt
+            # 弹出列映射对话框
+            dialog = ImportMappingDialog(self.master, columns, default_map, self.default_font)
+            self.master.wait_window(dialog)
+            if not dialog.result:
+                return
+            col_map = dialog.result
+            if not all(col_map.get(field) in columns for field in ['日期','类型','分类','金额','备注']):
+                messagebox.showerror('映射错误', '请为所有字段选择对应的列')
+                return
+            # 字段重命名
+            df = df.rename(columns={v: k for k, v in col_map.items()})
+            # 数据标准化
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            df['类型'] = df['类型'].map(lambda x: '收入' if '入' in str(x) else '支出')
+            df['分类'] = df['分类'].fillna('支付宝')
+            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
+            df['备注'] = df['备注'].astype(str)
+            # 弹出预览窗口，展示即将导入的数据
+            preview = tk.Toplevel(self.master)
+            preview.title('支付宝账单数据预览')
+            preview.geometry('700x300')
+            cols = ['日期', '类型', '分类', '金额', '备注']
+            tree = ttk.Treeview(preview, columns=cols, show='headings', height=10)
+            for col in cols:
+                tree.heading(col, text=col)
+                tree.column(col, width=120, anchor='center')
+            for _, row in df[cols].iterrows():
+                tree.insert('', 'end', values=(row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
+            tree.pack(fill='both', expand=True)
+            btn_frame = ttk.Frame(preview)
+            btn_frame.pack(fill='x', pady=8)
+            def confirm_import():
+                self.data = pd.concat([self.data, df[cols]], ignore_index=True)
+                self.dirty = True
+                self.refresh_table()
+                messagebox.showinfo('导入成功', f'已从支付宝账单导入 {len(df)} 条记录')
+                preview.destroy()
+            def cancel_import():
+                preview.destroy()
+            ttk.Button(btn_frame, text='确认导入', command=confirm_import).pack(side='left', padx=20)
+            ttk.Button(btn_frame, text='取消', command=cancel_import).pack(side='left', padx=20)
+        except Exception as e:
+            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
             self.data = df[['日期', '类型', '分类', '金额', '备注']].copy()
             self.dirty = True
             self.refresh_table()
@@ -235,15 +318,80 @@ class RecordBook:
         except Exception as e:
             messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
 
-    def ensure_db(self):
-        # 检查默认db，不存在则弹窗让用户选择db
-        if not os.path.exists(self.db_path):
-            db_path = filedialog.askopenfilename(title='请选择账单数据库文件', filetypes=[('SQLite数据库', '*.db')])
-            if not db_path:
-                messagebox.showerror('未选择数据库', '未选择数据库文件，程序即将退出')
-                self.master.destroy()
+    def import_wechat_excel(self):
+        file_path = filedialog.askopenfilename(title='选择微信账单Excel文件', filetypes=[('Excel文件', '*.xls;*.xlsx')])
+        if not file_path:
+            return
+        try:
+            # 微信账单前16行为说明，第17行开始为数据
+            df = pd.read_excel(file_path, header=16, usecols=[0, 2, 3, 4, 5])
+            columns = list(df.columns)
+            # 尝试自动推测映射（优先中文字段）
+            default_map = {}
+            for std, wechat in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易对方','金额（元）','商品']):
+                if wechat in columns:
+                    default_map[std] = wechat
+            # 兼容英文账单
+            alt_map = {'日期':'Date','类型':'Type','分类':'Category','金额':'Amount','备注':'Description'}
+            for std, alt in alt_map.items():
+                if std not in default_map and alt in columns:
+                    default_map[std] = alt
+            # 弹出列映射对话框
+            dialog = ImportMappingDialog(self.master, columns, default_map, self.default_font)
+            self.master.wait_window(dialog)
+            if not dialog.result:
                 return
-            self.db_path = db_path
+            col_map = dialog.result
+            if not all(col_map.get(field) in columns for field in ['日期','类型','分类','金额','备注']):
+                messagebox.showerror('映射错误', '请为所有字段选择对应的列')
+                return
+            # 字段重命名
+            df = df.rename(columns={v: k for k, v in col_map.items()})
+            # 去除金额中的¥符号
+            df['金额'] = df['金额'].str.replace('¥', '')
+            # 数据标准化
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            df['类型'] = df['类型'].map(lambda x: '收入' if '收入' in str(x) or '入账' in str(x) else '支出')
+            df['分类'] = df['分类'].fillna('微信')
+            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
+            df['备注'] = df['备注'].astype(str)
+            # 弹出预览窗口，展示即将导入的数据
+            preview = tk.Toplevel(self.master)
+            preview.title('微信账单数据预览')
+            preview.geometry('700x300')
+            cols = ['日期', '类型', '分类', '金额', '备注']
+            tree = ttk.Treeview(preview, columns=cols, show='headings', height=10)
+            for col in cols:
+                tree.heading(col, text=col)
+                tree.column(col, width=120, anchor='center')
+            for _, row in df[cols].iterrows():
+                tree.insert('', 'end', values=(row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
+            tree.pack(fill='both', expand=True)
+            btn_frame = ttk.Frame(preview)
+            btn_frame.pack(fill='x', pady=8)
+            def confirm_import():
+                self.data = pd.concat([self.data, df[cols]], ignore_index=True)
+                self.dirty = True
+                self.refresh_table()
+                self.save_data()
+                messagebox.showinfo('导入成功', f'已从微信账单导入 {len(df)} 条记录')
+                preview.destroy()
+            def cancel_import():
+                preview.destroy()
+            ttk.Button(btn_frame, text='确认导入', command=confirm_import).pack(side='left', padx=20)
+            ttk.Button(btn_frame, text='取消', command=cancel_import).pack(side='left', padx=20)
+        except Exception as e:
+            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
+
+    def ensure_db(self):
+        # 检查默认db，不存在则自动创建
+        if not os.path.exists(self.db_path):
+            # 确保目录存在
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+            # 提示用户将新建数据库
+            messagebox.showinfo('初始化数据库', f'将在以下位置新建数据库文件：\n{self.db_path}')
         self.conn = sqlite3.connect(self.db_path)
         self.create_table()
 
@@ -279,6 +427,7 @@ class RecordBook:
                       (row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
         self.conn.commit()
         self.dirty = False
+        messagebox.showinfo('保存成功', '数据已成功保存！')
 
     def save_as(self):
         # 另存为新db文件
@@ -343,6 +492,10 @@ class RecordBook:
         self.date_var = tk.StringVar(value=datetime.now().strftime('%Y-%m-%d'))
         self.date_entry = DateEntry(input_frame, textvariable=self.date_var, date_pattern='yyyy-mm-dd', width=12, font=self.default_font)
         self.date_entry.grid(row=0, column=1, padx=5, pady=5)
+        try:
+            self.date_entry.bind('<Escape>', lambda e: self._on_de_escape(self.date_entry), add='+')
+        except Exception:
+            pass
 
         ttk.Label(input_frame, text='类型:').grid(row=0, column=2, padx=5, pady=5)
         self.type_var = tk.StringVar(value='支出')
@@ -523,6 +676,54 @@ class RecordBook:
                 self.clear_filter()
             else:
                 self.apply_filter(dialog.result)
+
+    def _close_date_popup(self, de: DateEntry):
+        try:
+            top = getattr(de, '_top_cal', None)
+            if top is None:
+                return
+            if not top.winfo_exists():
+                return
+            try:
+                top.event_generate('<Escape>')
+            except Exception:
+                pass
+            try:
+                for child in top.winfo_children():
+                    try:
+                        child.event_generate('<Escape>')
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                top.withdraw()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _on_escape(self, event=None):
+        try:
+            w = self.master.focus_get()
+            if isinstance(w, DateEntry):
+                self._close_date_popup(w)
+                return 'break'
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'date_entry'):
+                self._close_date_popup(self.date_entry)
+        except Exception:
+            pass
+        return 'break'
+
+    def _on_de_escape(self, de: DateEntry):
+        try:
+            self._close_date_popup(de)
+        except Exception:
+            pass
+        return 'break'
 
     def sort_by_column(self, col):
         # 切换排序方向

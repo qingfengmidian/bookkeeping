@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from tkcalendar import DateEntry
 from utils.constants import CATEGORIES
 
 class FilterDialog(tk.Toplevel):
@@ -13,34 +14,31 @@ class FilterDialog(tk.Toplevel):
         self.grab_set()
         self.font = font
 
-        # 年月日下拉选项
+        # 日期选择器
         import datetime
         now = datetime.datetime.now()
-        years = list(range(2000, now.year + 1))
-        months = list(range(1, 13))
-        days = list(range(1, 32))
 
         self.vars = {}
         # 起始日期
         tk.Label(self, text='起始日期:', font=self.font).grid(row=0, column=0, padx=10, pady=10, sticky='w')
         start_val = filter_dict.get('start', '')
-        s_year, s_month, s_day = self.split_date(start_val, now.year, 1, 1)
-        self.s_year_var = tk.IntVar(value=s_year)
-        self.s_month_var = tk.IntVar(value=s_month)
-        self.s_day_var = tk.IntVar(value=s_day)
-        ttk.Combobox(self, textvariable=self.s_year_var, values=years, width=6, font=self.font, state='readonly').grid(row=0, column=1, padx=2, pady=10, sticky='w')
-        ttk.Combobox(self, textvariable=self.s_month_var, values=months, width=4, font=self.font, state='readonly').grid(row=0, column=2, padx=2, pady=10, sticky='w')
-        ttk.Combobox(self, textvariable=self.s_day_var, values=days, width=4, font=self.font, state='readonly').grid(row=0, column=3, padx=2, pady=10, sticky='w')
+        self.start_var = tk.StringVar(value=start_val or now.strftime('%Y-%m-%d'))
+        self.start_entry = DateEntry(self, textvariable=self.start_var, date_pattern='yyyy-mm-dd', width=12, font=self.font)
+        self.start_entry.grid(row=0, column=1, padx=2, pady=10, sticky='w')
+        try:
+            self.start_entry.bind('<Escape>', lambda e: self._on_de_escape(self.start_entry), add='+')
+        except Exception:
+            pass
         # 结束日期
         tk.Label(self, text='结束日期:', font=self.font).grid(row=1, column=0, padx=10, pady=10, sticky='w')
         end_val = filter_dict.get('end', '')
-        e_year, e_month, e_day = self.split_date(end_val, now.year, 12, 31)
-        self.e_year_var = tk.IntVar(value=e_year)
-        self.e_month_var = tk.IntVar(value=e_month)
-        self.e_day_var = tk.IntVar(value=e_day)
-        ttk.Combobox(self, textvariable=self.e_year_var, values=years, width=6, font=self.font, state='readonly').grid(row=1, column=1, padx=2, pady=10, sticky='w')
-        ttk.Combobox(self, textvariable=self.e_month_var, values=months, width=4, font=self.font, state='readonly').grid(row=1, column=2, padx=2, pady=10, sticky='w')
-        ttk.Combobox(self, textvariable=self.e_day_var, values=days, width=4, font=self.font, state='readonly').grid(row=1, column=3, padx=2, pady=10, sticky='w')
+        self.end_var = tk.StringVar(value=end_val or now.strftime('%Y-%m-%d'))
+        self.end_entry = DateEntry(self, textvariable=self.end_var, date_pattern='yyyy-mm-dd', width=12, font=self.font)
+        self.end_entry.grid(row=1, column=1, padx=2, pady=10, sticky='w')
+        try:
+            self.end_entry.bind('<Escape>', lambda e: self._on_de_escape(self.end_entry), add='+')
+        except Exception:
+            pass
         # 其余筛选项
         # 金额区间
         tk.Label(self, text='最小金额:', font=self.font).grid(row=2, column=0, padx=10, pady=10, sticky='w')
@@ -77,9 +75,9 @@ class FilterDialog(tk.Toplevel):
         return default_year, default_month, default_day
 
     def on_ok(self):
-        # 组装日期
-        start = f"{self.s_year_var.get():04d}-{self.s_month_var.get():02d}-{self.s_day_var.get():02d}"
-        end = f"{self.e_year_var.get():04d}-{self.e_month_var.get():02d}-{self.e_day_var.get():02d}"
+        # 读取 DateEntry 的日期字符串（yyyy-mm-dd）
+        start = self.start_var.get()
+        end = self.end_var.get()
         result = {
             'start': start,
             'end': end,
@@ -93,6 +91,32 @@ class FilterDialog(tk.Toplevel):
     def on_clear(self):
         self.result = '__clear__'
         self.destroy()
+
+    def _close_date_popup(self, de: DateEntry):
+        try:
+            top = getattr(de, '_top_cal', None)
+            if not top:
+                return
+            if not top.winfo_exists():
+                return
+            top.withdraw()
+        except Exception:
+            pass
+
+    def _on_escape(self, event=None):
+        try:
+            w = self.focus_get()
+            if isinstance(w, DateEntry):
+                self._close_date_popup(w)
+                return 'break'
+        except Exception:
+            pass
+        try:
+            self._close_date_popup(self.start_entry)
+            self._close_date_popup(self.end_entry)
+        except Exception:
+            pass
+        return 'break'
 
 class EditRecordDialog(tk.Toplevel):
     def __init__(self, master, record, font):
@@ -146,7 +170,7 @@ class ImportMappingDialog(tk.Toplevel):
         self.vars = {}
         fields = ['日期', '类型', '分类', '金额', '备注']
         for i, field in enumerate(fields):
-            tk.Label(self, text=f'{field} 对应列:', font=self.font).grid(row=i, column=0, padx=10, pady=10, sticky='e')
+            tk.Label(self, text=f'{field}:', font=self.font).grid(row=i, column=0, padx=10, pady=10, sticky='e')
             var = tk.StringVar(value=default_map.get(field, columns[0] if columns else ''))
             cb = ttk.Combobox(self, textvariable=var, values=columns, state='readonly', font=self.font)
             cb.grid(row=i, column=1, padx=10, pady=10, sticky='w')
@@ -155,4 +179,80 @@ class ImportMappingDialog(tk.Toplevel):
         btn.grid(row=len(fields), column=0, columnspan=2, pady=20)
     def on_ok(self):
         self.result = {field: var.get() for field, var in self.vars.items()}
+        self.destroy()
+
+
+class PreviewDialog(tk.Toplevel):
+    def __init__(self, master, data, font):
+        """
+        显示导入数据预览的对话框
+        
+        Args:
+            master: 父窗口
+            data: 要预览的DataFrame数据
+            font: 字体设置
+        """
+        super().__init__(master)
+        self.title('导入数据预览')
+        self.geometry('800x500')  # 更大的窗口以显示更多数据
+        self.result = False  # 默认不确认导入
+        self.resizable(True, True)  # 允许调整大小
+        self.transient(master)
+        self.grab_set()
+        self.font = font
+        
+        # 创建预览标签
+        tk.Label(self, text='即将导入的数据预览（显示前10行）：', font=self.font).pack(pady=10)
+        
+        # 创建表格显示预览数据
+        frame = ttk.Frame(self)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # 创建Treeview显示数据
+        columns = list(data.columns)
+        self.tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        
+        # 设置列标题和宽度
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=100, anchor='center')
+        
+        # 添加滚动条
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        
+        # 放置滚动条
+        self.tree.grid(column=0, row=0, sticky='nsew')
+        vsb.grid(column=1, row=0, sticky='ns')
+        hsb.grid(column=0, row=1, sticky='ew')
+        
+        # 配置frame的网格权重
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        
+        # 显示数据（最多显示前10行）
+        preview_data = data.head(10)
+        for i, row in preview_data.iterrows():
+            values = [row[col] for col in columns]
+            self.tree.insert('', 'end', values=values)
+        
+        # 显示总行数信息
+        total_rows = len(data)
+        tk.Label(self, text=f'总记录数: {total_rows}', font=self.font).pack(pady=5)
+        
+        # 按钮区域
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+        
+        # 确认和取消按钮
+        ttk.Button(btn_frame, text='确认导入', command=self.on_confirm).pack(side='left', padx=10)
+        ttk.Button(btn_frame, text='取消', command=self.on_cancel).pack(side='right', padx=10)
+    
+    def on_confirm(self):
+        self.result = True
+        self.destroy()
+    
+    def on_cancel(self):
+        self.result = False
         self.destroy()
