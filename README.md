@@ -51,16 +51,51 @@ windsurf/
 
 ## 运行
 
-如何创建虚拟环境并安装依赖
+创建虚拟环境并安装依赖
 
 ```
 python -m venv venv
 .\venv\Scripts\pip install -r requirements.txt
 ```
 
+在虚拟环境中安装某个库（例如pytest）
 
-如何在虚拟环境中运行此程序
+```
+.\venv\Scripts\pip install pytest
+```
+
+在虚拟环境中运行此程序
 
 ```
 .\venv\Scripts\python main.py
+```
+
+激活虚拟环境并在虚拟环境中执行命令
+
+```
+.\venv\Scripts\activate
+
+pip install pytest
+```
+
+退出虚拟环境
+
+```
+deactivate
+```
+
+执行测试用例
+1. 激活环境
+```
+.\venv\Scripts\activate
+```
+2. 在项目根目录运行
+
+```
+pytest
+```
+3. 执行完后退出虚拟环境
+
+```
+deactivate
 ```
