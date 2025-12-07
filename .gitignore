@@ -1,1 +1,6 @@
 venv/
+load_path/
+ui/__pycache__/
+
+# 忽略所有Python编译缓存文件
+*.pyc
