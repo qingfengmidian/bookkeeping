@@ -118,6 +118,13 @@ class FilterDialog(tk.Toplevel):
             pass
         return 'break'
 
+    def _on_de_escape(self, de: DateEntry):
+        try:
+            self._close_date_popup(de)
+        except Exception:
+            pass
+        return 'break'
+
 class EditRecordDialog(tk.Toplevel):
     def __init__(self, master, record, font):
         super().__init__(master)
