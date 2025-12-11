@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font as tkfont
-from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog
+from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog, PreviewDialog
 from ui.charts import show_monthly_chart, show_single_month_pie, show_pie
 from db.database import ensure_db, create_table, load_data, save_data
 from model.record_model import process_monthly, process_detail
@@ -36,6 +36,7 @@ class RecordBook:
         menubar = tk.Menu(self.master)
         # 文件菜单
         file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label='新建', command=self.new_db)
         file_menu.add_command(label='打开', command=self.open_db)
         file_menu.add_command(label='保存', command=self.save_data)
         file_menu.add_command(label='另存为', command=self.save_as)
@@ -225,7 +226,9 @@ class RecordBook:
             
             # 如果用户确认导入，才进行实际导入
             if preview_dialog.result:
-                self.data = pd.concat([self.data, preview_df], ignore_index=True)
+                # 使用用户在预览中可能修改后的数据
+                final_df = preview_dialog.data[['日期', '类型', '分类', '金额', '备注']].copy()
+                self.data = pd.concat([self.data, final_df], ignore_index=True)
                 self.dirty = True
                 self.refresh_table()
                 messagebox.showinfo('导入成功', f'已导入 {len(df)} 条账单')
@@ -271,50 +274,19 @@ class RecordBook:
             df['分类'] = df['分类'].fillna('支付宝')
             df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
             df['备注'] = df['备注'].astype(str)
-            # 弹出预览窗口，展示即将导入的数据
-            preview = tk.Toplevel(self.master)
-            preview.title('支付宝账单数据预览')
-            preview.geometry('700x300')
+
+            # 使用统一的预览对话框，支持排序和逐行编辑
             cols = ['日期', '类型', '分类', '金额', '备注']
-            tree = ttk.Treeview(preview, columns=cols, show='headings', height=10)
-            for col in cols:
-                tree.heading(col, text=col)
-                tree.column(col, width=120, anchor='center')
-            for _, row in df[cols].iterrows():
-                tree.insert('', 'end', values=(row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
-            tree.pack(fill='both', expand=True)
-            btn_frame = ttk.Frame(preview)
-            btn_frame.pack(fill='x', pady=8)
-            def confirm_import():
-                self.data = pd.concat([self.data, df[cols]], ignore_index=True)
+            preview_df = df[cols].copy()
+            preview_dialog = PreviewDialog(self.master, preview_df, self.default_font)
+            self.master.wait_window(preview_dialog)
+
+            if preview_dialog.result:
+                final_df = preview_dialog.data[cols].copy()
+                self.data = pd.concat([self.data, final_df], ignore_index=True)
                 self.dirty = True
                 self.refresh_table()
-                messagebox.showinfo('导入成功', f'已从支付宝账单导入 {len(df)} 条记录')
-                preview.destroy()
-            def cancel_import():
-                preview.destroy()
-            ttk.Button(btn_frame, text='确认导入', command=confirm_import).pack(side='left', padx=20)
-            ttk.Button(btn_frame, text='取消', command=cancel_import).pack(side='left', padx=20)
-        except Exception as e:
-            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
-            self.data = df[['日期', '类型', '分类', '金额', '备注']].copy()
-            self.dirty = True
-            self.refresh_table()
-            messagebox.showinfo('导入成功', f'已导入 {len(self.data)} 条账单')
-            # 不保存到数据库，只加载到self.data
-        except Exception as e:
-            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
-            # 检查是否有缺失
-            if not all(field in imported_df.columns for field in ['日期','类型','分类','金额','备注']):
-                messagebox.showerror('导入失败', '映射后缺少必要字段: 日期, 类型, 分类, 金额, 备注')
-                return
-            # 日期标准化处理
-            imported_df['日期'] = pd.to_datetime(imported_df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
-            # 合并数据
-            self.data = pd.concat([self.data, imported_df[['日期','类型','分类','金额','备注']]], ignore_index=True)
-            self.save_data()
-            self.refresh_table()
-            messagebox.showinfo('导入成功', '数据已成功导入')
+                messagebox.showinfo('导入成功', f'已从支付宝账单导入 {len(final_df)} 条记录')
         except Exception as e:
             messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
 
@@ -355,31 +327,20 @@ class RecordBook:
             df['分类'] = df['分类'].fillna('微信')
             df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
             df['备注'] = df['备注'].astype(str)
-            # 弹出预览窗口，展示即将导入的数据
-            preview = tk.Toplevel(self.master)
-            preview.title('微信账单数据预览')
-            preview.geometry('700x300')
+
+            # 使用统一的预览对话框，支持排序和逐行编辑
             cols = ['日期', '类型', '分类', '金额', '备注']
-            tree = ttk.Treeview(preview, columns=cols, show='headings', height=10)
-            for col in cols:
-                tree.heading(col, text=col)
-                tree.column(col, width=120, anchor='center')
-            for _, row in df[cols].iterrows():
-                tree.insert('', 'end', values=(row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
-            tree.pack(fill='both', expand=True)
-            btn_frame = ttk.Frame(preview)
-            btn_frame.pack(fill='x', pady=8)
-            def confirm_import():
-                self.data = pd.concat([self.data, df[cols]], ignore_index=True)
+            preview_df = df[cols].copy()
+            preview_dialog = PreviewDialog(self.master, preview_df, self.default_font)
+            self.master.wait_window(preview_dialog)
+
+            if preview_dialog.result:
+                final_df = preview_dialog.data[cols].copy()
+                self.data = pd.concat([self.data, final_df], ignore_index=True)
                 self.dirty = True
                 self.refresh_table()
                 self.save_data()
-                messagebox.showinfo('导入成功', f'已从微信账单导入 {len(df)} 条记录')
-                preview.destroy()
-            def cancel_import():
-                preview.destroy()
-            ttk.Button(btn_frame, text='确认导入', command=confirm_import).pack(side='left', padx=20)
-            ttk.Button(btn_frame, text='取消', command=cancel_import).pack(side='left', padx=20)
+                messagebox.showinfo('导入成功', f'已从微信账单导入 {len(final_df)} 条记录')
         except Exception as e:
             messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
 
@@ -457,6 +418,36 @@ class RecordBook:
         self.dirty = False
         self.data = self.load_data()
         self.refresh_table()
+
+    def new_db(self):
+        # 新建一个空数据库文件
+        if self.dirty:
+            res = messagebox.askyesnocancel('未保存更改', '当前数据尚未保存，是否先保存？')
+            if res is None:
+                return
+            elif res:
+                self.save_data()
+        new_path = filedialog.asksaveasfilename(defaultextension='.db', filetypes=[('SQLite数据库', '*.db')])
+        if not new_path:
+            return
+        # 关闭旧连接
+        if self.conn:
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+        # 创建新数据库并初始化表
+        self.db_path = new_path
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        self.conn = sqlite3.connect(self.db_path)
+        self.create_table()
+        # 清空当前数据并刷新界面
+        self.data = self.load_data()
+        self.dirty = False
+        self.refresh_table()
+        messagebox.showinfo('新建成功', f'已创建新的数据库：{self.db_path}')
 
     def open_db(self):
         # 打开并切换数据库文件，默认路径为database目录

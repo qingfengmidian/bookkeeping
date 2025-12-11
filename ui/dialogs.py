@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 from utils.constants import CATEGORIES
+import pandas as pd
 
 class FilterDialog(tk.Toplevel):
     def __init__(self, master, filter_dict, font):
@@ -207,6 +208,10 @@ class PreviewDialog(tk.Toplevel):
         self.transient(master)
         self.grab_set()
         self.font = font
+        # 保存一份可编辑的数据副本
+        self.data = data.copy()
+        # 当前排序状态
+        self._sort_state = {'col': None, 'asc': True}
         
         # 创建预览标签
         tk.Label(self, text='即将导入的数据预览（显示前10行）：', font=self.font).pack(pady=10)
@@ -216,12 +221,12 @@ class PreviewDialog(tk.Toplevel):
         frame.pack(fill='both', expand=True, padx=10, pady=10)
         
         # 创建Treeview显示数据
-        columns = list(data.columns)
-        self.tree = ttk.Treeview(frame, columns=columns, show='headings', height=10)
+        self.columns = list(self.data.columns)
+        self.tree = ttk.Treeview(frame, columns=self.columns, show='headings', height=10)
         
-        # 设置列标题和宽度
-        for col in columns:
-            self.tree.heading(col, text=col)
+        # 设置列标题和宽度，并绑定点击排序
+        for col in self.columns:
+            self.tree.heading(col, text=col, command=lambda c=col: self._on_heading_click(c))
             self.tree.column(col, width=100, anchor='center')
         
         # 添加滚动条
@@ -239,15 +244,15 @@ class PreviewDialog(tk.Toplevel):
         frame.rowconfigure(0, weight=1)
         
         # 显示数据（最多显示前10行）
-        preview_data = data.head(10)
-        for i, row in preview_data.iterrows():
-            values = [row[col] for col in columns]
-            self.tree.insert('', 'end', values=values)
+        self._refresh_tree()
         
         # 显示总行数信息
         total_rows = len(data)
         tk.Label(self, text=f'总记录数: {total_rows}', font=self.font).pack(pady=5)
         
+        # 绑定双击编辑事件
+        self.tree.bind('<Double-1>', self._on_tree_double_click)
+
         # 按钮区域
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill='x', padx=10, pady=10)
@@ -263,3 +268,62 @@ class PreviewDialog(tk.Toplevel):
     def on_cancel(self):
         self.result = False
         self.destroy()
+
+    def _refresh_tree(self):
+        # 根据当前排序状态刷新Treeview内容
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        df = self.data
+        col = self._sort_state.get('col')
+        if col:
+            asc = self._sort_state.get('asc', True)
+            if col == '日期':
+                # 日期列按时间排序
+                df = df.copy()
+                df['__tmp_date__'] = pd.to_datetime(df['日期'], errors='coerce')
+                df = df.sort_values('__tmp_date__', ascending=asc).drop(columns=['__tmp_date__'])
+            else:
+                df = df.sort_values(col, ascending=asc)
+        # 保持使用原索引作为iid，方便编辑回写
+        for idx, row in df.iterrows():
+            values = [row.get(col, '') for col in self.columns]
+            self.tree.insert('', 'end', iid=str(idx), values=values)
+
+    def _on_heading_click(self, col):
+        # 列表头点击切换排序状态
+        if self._sort_state['col'] == col:
+            self._sort_state['asc'] = not self._sort_state['asc']
+        else:
+            self._sort_state['col'] = col
+            self._sort_state['asc'] = True
+        self._refresh_tree()
+
+    def _on_tree_double_click(self, event):
+        # 双击行进行编辑
+        item_id = self.tree.focus()
+        if not item_id:
+            return
+        try:
+            row_idx = int(item_id)
+        except ValueError:
+            return
+        if row_idx not in self.data.index:
+            return
+        # 仅在具备标准字段时启用编辑
+        fields = ['日期', '类型', '分类', '金额', '备注']
+        record = {field: self.data.loc[row_idx].get(field, '') for field in fields if field in self.data.columns}
+        if set(fields).issubset(self.data.columns):
+            dialog = EditRecordDialog(self, record, self.font)
+            self.wait_window(dialog)
+            if dialog.result:
+                # 回写修改
+                for field in fields:
+                    self.data.at[row_idx, field] = dialog.result.get(field, self.data.at[row_idx, field])
+                # 金额列转为数字
+                if '金额' in self.data.columns:
+                    try:
+                        self.data['金额'] = pd.to_numeric(self.data['金额'], errors='coerce')
+                    except Exception:
+                        pass
+                self._refresh_tree()
+
