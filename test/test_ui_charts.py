@@ -1,4 +1,5 @@
 import pandas as pd
+from unittest.mock import patch, MagicMock
 
 from ui import charts
 
@@ -44,6 +45,7 @@ def test_show_single_month_pie_empty_df(monkeypatch):
 
 def test_show_monthly_chart_only_expense_no_income(monkeypatch):
     """只有支出或只有收入时，内部应能正常处理，不抛异常。"""
+    from unittest.mock import MagicMock
 
     # mock 掉 Tk 相关类，避免真实创建窗口
     class DummyWin:
@@ -77,22 +79,27 @@ def test_show_monthly_chart_only_expense_no_income(monkeypatch):
     monkeypatch.setattr(charts.tk, "Toplevel", DummyWin)
     monkeypatch.setattr(charts, "FigureCanvasTkAgg", DummyCanvas)
 
-    # 只有支出数据
-    df = pd.DataFrame(
-        [
-            {"日期": "2025-01-01", "类型": "支出", "分类": "餐饮", "金额": 50.0},
-            {"日期": "2025-01-02", "类型": "支出", "分类": "交通", "金额": 20.0},
-        ]
-    )
+    # Mock matplotlib.pyplot 避免创建真实图表
+    mock_fig = MagicMock()
+    mock_ax = MagicMock()
+    with patch.object(charts.plt, 'subplots', return_value=(mock_fig, mock_ax)):
+        with patch.object(charts.plt, 'tight_layout'):
+            # 只有支出数据
+            df = pd.DataFrame(
+                [
+                    {"日期": "2025-01-01", "类型": "支出", "分类": "餐饮", "金额": 50.0},
+                    {"日期": "2025-01-02", "类型": "支出", "分类": "交通", "金额": 20.0},
+                ]
+            )
 
-    charts.show_monthly_chart(df, master=None)
+            charts.show_monthly_chart(df, master=None)
 
-    # 只有收入数据
-    df_income = pd.DataFrame(
-        [
-            {"日期": "2025-02-01", "类型": "收入", "分类": "工资", "金额": 1000.0},
-            {"日期": "2025-02-05", "类型": "收入", "分类": "奖金", "金额": 200.0},
-        ]
-    )
+            # 只有收入数据
+            df_income = pd.DataFrame(
+                [
+                    {"日期": "2025-02-01", "类型": "收入", "分类": "工资", "金额": 1000.0},
+                    {"日期": "2025-02-05", "类型": "收入", "分类": "奖金", "金额": 200.0},
+                ]
+            )
 
-    charts.show_monthly_chart(df_income, master=None)
+            charts.show_monthly_chart(df_income, master=None)

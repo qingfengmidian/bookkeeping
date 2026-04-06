@@ -44,3 +44,78 @@ def test_process_detail_filters_by_month():
 
     assert set(jan_dates) == {"2025-01-01", "2025-01-02"}
     assert set(feb_dates) == {"2025-02-01"}
+
+
+def test_process_monthly_empty_df():
+    """测试空 DataFrame 的月度处理"""
+    empty_df = pd.DataFrame(columns=['日期', '类型', '分类', '金额', '备注'])
+    
+    result = process_monthly(empty_df)
+    
+    # 应返回空 DataFrame
+    assert result.empty
+
+
+def test_process_detail_empty_df():
+    """测试空 DataFrame 的明细筛选"""
+    empty_df = pd.DataFrame(columns=['日期', '类型', '分类', '金额', '备注'])
+    
+    result = process_detail(empty_df, "2025-01")
+    
+    # 应返回空 DataFrame
+    assert result.empty
+
+
+def test_process_detail_nonexistent_month():
+    """测试筛选不存在的月份"""
+    df = _sample_df()
+    
+    result = process_detail(df, "2024-12")  # 不存在的月份
+    
+    # 应返回空 DataFrame
+    assert result.empty
+
+
+def test_process_monthly_only_income():
+    """测试只有收入数据的情况"""
+    df = pd.DataFrame([
+        {"日期": "2025-01-01", "类型": "收入", "分类": "工资", "金额": 1000.0, "备注": "test1"},
+        {"日期": "2025-01-15", "类型": "收入", "分类": "奖金", "金额": 500.0, "备注": "test2"},
+    ])
+    
+    monthly = process_monthly(df)
+    
+    assert len(monthly) == 1
+    assert monthly.loc["2025-01", "收入"] == 1500.0
+    assert monthly.loc["2025-01", "总支出"] == 0  # 没有支出应为0
+
+
+def test_process_monthly_only_expense():
+    """测试只有支出数据的情况"""
+    df = pd.DataFrame([
+        {"日期": "2025-01-01", "类型": "支出", "分类": "餐饮", "金额": 100.0, "备注": "test1"},
+        {"日期": "2025-01-15", "类型": "支出", "分类": "交通", "金额": 50.0, "备注": "test2"},
+    ])
+    
+    monthly = process_monthly(df)
+    
+    assert len(monthly) == 1
+    assert monthly.loc["2025-01", "支出"] == 150.0
+    assert monthly.loc["2025-01", "总收入"] == 0  # 没有收入应为0
+
+
+def test_process_detail_preserves_data():
+    """测试明细筛选是否保留原始数据完整性"""
+    df = _sample_df()
+    
+    jan_df = process_detail(df, "2025-01")
+    
+    # 验证筛选后的数据完整性
+    assert '日期' in jan_df.columns
+    assert '类型' in jan_df.columns
+    assert '分类' in jan_df.columns
+    assert '金额' in jan_df.columns
+    assert '备注' in jan_df.columns
+    
+    # 验证金额正确
+    assert jan_df['金额'].sum() == 1050.0  # 1000 + 50

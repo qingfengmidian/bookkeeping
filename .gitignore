@@ -1,6 +1,11 @@
 venv/
+.venv/
 load_path/
 ui/__pycache__/
+database/
 
 # 忽略所有Python编译缓存文件
 *.pyc
+__pycache__/
+.pytest_cache/
+*.db
