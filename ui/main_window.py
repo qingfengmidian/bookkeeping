@@ -4,7 +4,8 @@ from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog, Prev
 from ui.charts import show_monthly_chart, show_single_month_pie, show_pie
 from db.database import ensure_db, create_table, load_data, save_data
 from model.record_model import process_monthly, process_detail
-from utils.constants import DB_DEFAULT, CATEGORIES
+from utils.constants import DB_DEFAULT, CATEGORIES, TABLE_RECORDS_SCHEMA, TABLE_NAME, ALLOWED_TABLES
+from utils.logger import get_logger
 import pandas as pd
 from tkcalendar import DateEntry
 import os
@@ -12,6 +13,8 @@ import sqlite3
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+logger = get_logger(__name__)
 
 class RecordBook:
     def __init__(self, master):
@@ -25,8 +28,11 @@ class RecordBook:
         self.db_path = DB_DEFAULT
         self.conn = None
         self.dirty = False  # 数据变更标志
+        self.chart_window = None  # 图表窗口引用
+        logger.info(f'初始化数据库: {self.db_path}')
         self.ensure_db()
         self.data = self.load_data()
+        logger.info(f'加载了 {len(self.data)} 条记录')
         self.create_menu()
         self.create_widgets()
         self.refresh_table()
@@ -197,27 +203,45 @@ class RecordBook:
         frame.columnconfigure(0, weight=1)
 
 
-    def import_csv(self):
-        file_path = filedialog.askopenfilename(title='选择CSV文件', filetypes=[('CSV文件', '*.csv')])
-        if not file_path:
-            return
+    def _show_import_error(self, error_type: str, message: str):
+        """显示导入错误对话框"""
+        messagebox.showerror(error_type, message)
+    
+    def _parse_and_import(self, df: pd.DataFrame, default_map: dict, source_name: str, 
+                          auto_transform: callable = None):
+        """
+        通用导入流程：列映射 -> 数据转换 -> 预览 -> 导入
+        
+        Args:
+            df: 原始数据DataFrame
+            default_map: 默认列映射
+            source_name: 数据来源名称（用于提示信息）
+            auto_transform: 自动数据转换函数（可选）
+        """
         try:
-            df = pd.read_csv(file_path, encoding='utf-8')
-            # 弹出列映射对话框
             columns = list(df.columns)
-            default_map = {k: k for k in ['日期', '类型', '分类', '金额', '备注'] if k in columns}
+            
+            # 弹出列映射对话框
             dialog = ImportMappingDialog(self.master, columns, default_map, self.default_font)
             self.master.wait_window(dialog)
             if not dialog.result:
                 return
+            
             col_map = dialog.result
             if not all(col_map.get(field) in columns for field in ['日期','类型','分类','金额','备注']):
-                messagebox.showerror('映射错误', '请为所有字段选择对应的列')
+                self._show_import_error('映射错误', '请为所有字段选择对应的列')
                 return
+            
+            # 字段重命名
             df = df.rename(columns={v: k for k, v in col_map.items()})
+            
+            # 数据标准化
             df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
-            # 日期格式化
             df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
+            
+            # 应用自动转换（如支付宝/微信特殊处理）
+            if auto_transform:
+                df = auto_transform(df)
             
             # 弹出预览对话框
             preview_df = df[['日期', '类型', '分类', '金额', '备注']]
@@ -226,69 +250,113 @@ class RecordBook:
             
             # 如果用户确认导入，才进行实际导入
             if preview_dialog.result:
-                # 使用用户在预览中可能修改后的数据
                 final_df = preview_dialog.data[['日期', '类型', '分类', '金额', '备注']].copy()
                 self.data = pd.concat([self.data, final_df], ignore_index=True)
                 self.dirty = True
                 self.refresh_table()
-                messagebox.showinfo('导入成功', f'已导入 {len(df)} 条账单')
+                messagebox.showinfo('导入成功', f'已从{source_name}导入 {len(final_df)} 条记录')
             else:
                 messagebox.showinfo('取消导入', '已取消导入操作')
         except Exception as e:
-            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
+            self._show_import_error('导入失败', f'导入过程中发生错误: {e}')
+
+    def import_csv(self):
+        file_path = filedialog.askopenfilename(title='选择CSV文件', filetypes=[('CSV文件', '*.csv')])
+        if not file_path:
+            return
+        try:
+            df = pd.read_csv(file_path, encoding='utf-8')
+        except FileNotFoundError:
+            self._show_import_error('文件错误', '选择的文件不存在')
+            return
+        except UnicodeDecodeError:
+            self._show_import_error('编码错误', '文件编码错误，请尝试使用UTF-8编码保存文件')
+            return
+        except pd.errors.EmptyDataError:
+            messagebox.showinfo('空文件', '选择的文件没有数据')
+            return
+        except pd.errors.ParserError as e:
+            self._show_import_error('解析错误', f'CSV解析失败: {e}')
+            return
+        except Exception as e:
+            self._show_import_error('读取失败', f'无法读取文件: {e}')
+            return
+        
+        # 构建默认映射
+        columns = list(df.columns)
+        default_map = {k: k for k in ['日期', '类型', '分类', '金额', '备注'] if k in columns}
+        
+        self._parse_and_import(df, default_map, 'CSV文件')
+
+    def _build_alipay_mapping(self, columns: list) -> dict:
+        """构建支付宝账单的默认列映射"""
+        default_map = {}
+        for std, alipay in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易分类','金额','商品说明']):
+            if alipay in columns:
+                default_map[std] = alipay
+        # 兼容英文账单
+        alt_map = {'日期':'Date','类型':'In/Out','分类':'Product','金额':'Amount(¥)','备注':'Remark'}
+        for std, alt in alt_map.items():
+            if std not in default_map and alt in columns:
+                default_map[std] = alt
+        return default_map
+    
+    def _transform_alipay_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """支付宝数据自动转换"""
+        df['类型'] = df['类型'].map(lambda x: '收入' if '入' in str(x) else '支出')
+        df['分类'] = df['分类'].fillna('支付宝')
+        df['备注'] = df['备注'].astype(str)
+        return df
 
     def import_alipay_csv(self):
         file_path = filedialog.askopenfilename(title='选择支付宝账单CSV文件', filetypes=[('CSV文件', '*.csv')])
-        print(file_path)
         if not file_path:
             return
         try:
             # 支付宝账单前24行为说明，从第25行开始为数据
             # 支付宝账单，编码格式为gbk
             df = pd.read_csv(file_path, encoding='gbk', skiprows=24, usecols=range(7))
-            columns = list(df.columns)
-            # 尝试自动推测映射（优先中文字段）
-            default_map = {}
-            for std, alipay in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易分类','金额','商品说明']):
-                if alipay in columns:
-                    default_map[std] = alipay
-            # 兼容英文账单
-            alt_map = {'日期':'Date','类型':'In/Out','分类':'Product','金额':'Amount(¥)','备注':'Remark'}
-            for std, alt in alt_map.items():
-                if std not in default_map and alt in columns:
-                    default_map[std] = alt
-            # 弹出列映射对话框
-            dialog = ImportMappingDialog(self.master, columns, default_map, self.default_font)
-            self.master.wait_window(dialog)
-            if not dialog.result:
-                return
-            col_map = dialog.result
-            if not all(col_map.get(field) in columns for field in ['日期','类型','分类','金额','备注']):
-                messagebox.showerror('映射错误', '请为所有字段选择对应的列')
-                return
-            # 字段重命名
-            df = df.rename(columns={v: k for k, v in col_map.items()})
-            # 数据标准化
-            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
-            df['类型'] = df['类型'].map(lambda x: '收入' if '入' in str(x) else '支出')
-            df['分类'] = df['分类'].fillna('支付宝')
-            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
-            df['备注'] = df['备注'].astype(str)
-
-            # 使用统一的预览对话框，支持排序和逐行编辑
-            cols = ['日期', '类型', '分类', '金额', '备注']
-            preview_df = df[cols].copy()
-            preview_dialog = PreviewDialog(self.master, preview_df, self.default_font)
-            self.master.wait_window(preview_dialog)
-
-            if preview_dialog.result:
-                final_df = preview_dialog.data[cols].copy()
-                self.data = pd.concat([self.data, final_df], ignore_index=True)
-                self.dirty = True
-                self.refresh_table()
-                messagebox.showinfo('导入成功', f'已从支付宝账单导入 {len(final_df)} 条记录')
+        except FileNotFoundError:
+            self._show_import_error('文件错误', '选择的文件不存在')
+            return
+        except UnicodeDecodeError:
+            self._show_import_error('编码错误', '文件编码错误，支付宝账单通常使用GBK编码')
+            return
+        except pd.errors.EmptyDataError:
+            messagebox.showinfo('空文件', '选择的文件没有数据')
+            return
+        except pd.errors.ParserError as e:
+            self._show_import_error('解析错误', f'CSV解析失败，请确认是支付宝账单格式: {e}')
+            return
         except Exception as e:
-            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
+            self._show_import_error('读取失败', f'无法读取文件: {e}')
+            return
+        
+        default_map = self._build_alipay_mapping(list(df.columns))
+        self._parse_and_import(df, default_map, '支付宝账单', self._transform_alipay_data)
+
+    def _build_wechat_mapping(self, columns: list) -> dict:
+        """构建微信账单的默认列映射"""
+        default_map = {}
+        for std, wechat in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易对方','金额（元）','商品']):
+            if wechat in columns:
+                default_map[std] = wechat
+        # 兼容英文账单
+        alt_map = {'日期':'Date','类型':'Type','分类':'Category','金额':'Amount','备注':'Description'}
+        for std, alt in alt_map.items():
+            if std not in default_map and alt in columns:
+                default_map[std] = alt
+        return default_map
+    
+    def _transform_wechat_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """微信数据自动转换"""
+        # 去除金额中的¥符号
+        df['金额'] = df['金额'].str.replace('¥', '')
+        df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
+        df['类型'] = df['类型'].map(lambda x: '收入' if '收入' in str(x) or '入账' in str(x) else '支出')
+        df['分类'] = df['分类'].fillna('微信')
+        df['备注'] = df['备注'].astype(str)
+        return df
 
     def import_wechat_excel(self):
         file_path = filedialog.askopenfilename(title='选择微信账单Excel文件', filetypes=[('Excel文件', '*.xls;*.xlsx')])
@@ -297,52 +365,21 @@ class RecordBook:
         try:
             # 微信账单前16行为说明，第17行开始为数据
             df = pd.read_excel(file_path, header=16, usecols=[0, 2, 3, 4, 5])
-            columns = list(df.columns)
-            # 尝试自动推测映射（优先中文字段）
-            default_map = {}
-            for std, wechat in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易对方','金额（元）','商品']):
-                if wechat in columns:
-                    default_map[std] = wechat
-            # 兼容英文账单
-            alt_map = {'日期':'Date','类型':'Type','分类':'Category','金额':'Amount','备注':'Description'}
-            for std, alt in alt_map.items():
-                if std not in default_map and alt in columns:
-                    default_map[std] = alt
-            # 弹出列映射对话框
-            dialog = ImportMappingDialog(self.master, columns, default_map, self.default_font)
-            self.master.wait_window(dialog)
-            if not dialog.result:
-                return
-            col_map = dialog.result
-            if not all(col_map.get(field) in columns for field in ['日期','类型','分类','金额','备注']):
-                messagebox.showerror('映射错误', '请为所有字段选择对应的列')
-                return
-            # 字段重命名
-            df = df.rename(columns={v: k for k, v in col_map.items()})
-            # 去除金额中的¥符号
-            df['金额'] = df['金额'].str.replace('¥', '')
-            # 数据标准化
-            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
-            df['类型'] = df['类型'].map(lambda x: '收入' if '收入' in str(x) or '入账' in str(x) else '支出')
-            df['分类'] = df['分类'].fillna('微信')
-            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
-            df['备注'] = df['备注'].astype(str)
-
-            # 使用统一的预览对话框，支持排序和逐行编辑
-            cols = ['日期', '类型', '分类', '金额', '备注']
-            preview_df = df[cols].copy()
-            preview_dialog = PreviewDialog(self.master, preview_df, self.default_font)
-            self.master.wait_window(preview_dialog)
-
-            if preview_dialog.result:
-                final_df = preview_dialog.data[cols].copy()
-                self.data = pd.concat([self.data, final_df], ignore_index=True)
-                self.dirty = True
-                self.refresh_table()
-                self.save_data()
-                messagebox.showinfo('导入成功', f'已从微信账单导入 {len(final_df)} 条记录')
+        except FileNotFoundError:
+            self._show_import_error('文件错误', '选择的文件不存在')
+            return
+        except pd.errors.EmptyDataError:
+            messagebox.showinfo('空文件', '选择的文件没有数据')
+            return
+        except ValueError as e:
+            self._show_import_error('格式错误', f'Excel格式错误或缺少必要列: {e}')
+            return
         except Exception as e:
-            messagebox.showerror('导入失败', f'导入过程中发生错误: {e}')
+            self._show_import_error('读取失败', f'无法读取Excel文件: {e}')
+            return
+        
+        default_map = self._build_wechat_mapping(list(df.columns))
+        self._parse_and_import(df, default_map, '微信账单', self._transform_wechat_data)
 
     def ensure_db(self):
         # 检查默认db，不存在则自动创建
@@ -359,13 +396,8 @@ class RecordBook:
     def create_table(self):
         # 创建账单表
         c = self.conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            日期 TEXT,
-            类型 TEXT,
-            分类 TEXT,
-            金额 REAL,
-            备注 TEXT
+        c.execute(f'''CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+            {TABLE_RECORDS_SCHEMA}
         )''')
         self.conn.commit()
 
@@ -381,43 +413,73 @@ class RecordBook:
 
     def save_data(self):
         # 保存DataFrame到当前数据库（全量覆盖）
-        c = self.conn.cursor()
-        c.execute('DELETE FROM records')
-        for _, row in self.data.iterrows():
-            c.execute('INSERT INTO records (日期, 类型, 分类, 金额, 备注) VALUES (?, ?, ?, ?, ?)',
-                      (row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
-        self.conn.commit()
-        self.dirty = False
-        messagebox.showinfo('保存成功', '数据已成功保存！')
+        try:
+            c = self.conn.cursor()
+            c.execute('DELETE FROM records')
+            
+            # 使用executemany批量插入，提升性能
+            if not self.data.empty:
+                data_tuples = [
+                    (row['日期'], row['类型'], row['分类'], row['金额'], row['备注'])
+                    for _, row in self.data.iterrows()
+                ]
+                c.executemany(
+                    'INSERT INTO records (日期, 类型, 分类, 金额, 备注) VALUES (?, ?, ?, ?, ?)',
+                    data_tuples
+                )
+            
+            self.conn.commit()
+            self.dirty = False
+            logger.info(f'数据保存成功，共 {len(self.data)} 条记录')
+            messagebox.showinfo('保存成功', '数据已成功保存！')
+        except sqlite3.Error as e:
+            self.conn.rollback()
+            logger.error(f'保存数据时数据库错误: {e}')
+            messagebox.showerror('保存失败', f'数据库错误: {e}')
+        except Exception as e:
+            self.conn.rollback()
+            logger.exception('保存数据时发生错误')
+            messagebox.showerror('保存失败', f'保存过程中发生错误: {e}')
 
     def save_as(self):
         # 另存为新db文件
         new_path = filedialog.asksaveasfilename(defaultextension='.db', filetypes=[('SQLite数据库', '*.db')])
         if not new_path:
             return
-        # 新建数据库并写入数据
-        new_conn = sqlite3.connect(new_path)
-        c = new_conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            日期 TEXT,
-            类型 TEXT,
-            分类 TEXT,
-            金额 REAL,
-            备注 TEXT
-        )''')
-        for _, row in self.data.iterrows():
-            c.execute('INSERT INTO records (日期, 类型, 分类, 金额, 备注) VALUES (?, ?, ?, ?, ?)',
-                      (row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
-        new_conn.commit()
-        new_conn.close()
-        self.db_path = new_path
-        self.conn.close()
-        self.conn = sqlite3.connect(self.db_path)
-        messagebox.showinfo('另存为成功', f'数据已另存为 {self.db_path}')
-        self.dirty = False
-        self.data = self.load_data()
-        self.refresh_table()
+        # 验证表名（防止SQL注入）
+        if TABLE_NAME not in ALLOWED_TABLES:
+            messagebox.showerror('错误', f'无效的表名: {TABLE_NAME}')
+            return
+        try:
+            # 新建数据库并写入数据
+            new_conn = sqlite3.connect(new_path)
+            c = new_conn.cursor()
+            c.execute(f'''CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+                {TABLE_RECORDS_SCHEMA}
+            )''')
+            # 使用executemany批量插入，提升性能
+            if not self.data.empty:
+                data_tuples = [
+                    (row['日期'], row['类型'], row['分类'], row['金额'], row['备注'])
+                    for _, row in self.data.iterrows()
+                ]
+                c.executemany(
+                    f'INSERT INTO {TABLE_NAME} (日期, 类型, 分类, 金额, 备注) VALUES (?, ?, ?, ?, ?)',
+                    data_tuples
+                )
+            new_conn.commit()
+            new_conn.close()
+            self.db_path = new_path
+            self.conn.close()
+            self.conn = sqlite3.connect(self.db_path)
+            messagebox.showinfo('另存为成功', f'数据已另存为 {self.db_path}')
+            self.dirty = False
+            self.data = self.load_data()
+            self.refresh_table()
+        except sqlite3.Error as e:
+            messagebox.showerror('保存失败', f'数据库错误: {e}')
+        except Exception as e:
+            messagebox.showerror('保存失败', f'保存过程中发生错误: {e}')
 
     def new_db(self):
         # 新建一个空数据库文件
@@ -566,10 +628,12 @@ class RecordBook:
         try:
             amount = float(amount)
         except ValueError:
+            logger.warning(f'添加记录失败：金额格式错误 - {amount}')
             messagebox.showerror('输入错误', '金额必须为数字')
             messagebox.showerror('添加失败', '账单添加失败，金额必须为数字')
             return
         if not date or not type_ or not cat:
+            logger.warning('添加记录失败：信息不完整')
             messagebox.showerror('输入错误', '请填写完整信息')
             messagebox.showerror('添加失败', '账单添加失败，请填写完整信息')
             return
@@ -584,8 +648,10 @@ class RecordBook:
             self.dirty = True
             self.refresh_table()
             self.clear_inputs()
+            logger.info(f'添加记录成功：{type_} - {cat} - {amount}元')
             messagebox.showinfo('添加成功', '账单添加成功！')
         except Exception as e:
+            logger.exception('添加记录失败')
             messagebox.showerror('添加失败', f'账单添加失败：{e}')
 
     def clear_inputs(self):
@@ -759,6 +825,7 @@ class RecordBook:
         self.data = self.data.drop(index=idxs).reset_index(drop=True)
         self.dirty = True
         self.refresh_table()
+        logger.info(f'删除记录成功：共 {len(idxs)} 条')
         messagebox.showinfo('删除成功', f'已删除 {len(idxs)} 条账单')
 
     def delete_all_records(self):
@@ -770,12 +837,14 @@ class RecordBook:
         self.data = self.data.iloc[0:0].copy()
         self.dirty = True
         self.refresh_table()
+        logger.info('删除全部记录成功')
         messagebox.showinfo('删除成功', '已删除全部账单')
 
     def export_csv(self):
         file_path = filedialog.asksaveasfilename(defaultextension='.csv', filetypes=[('CSV文件', '*.csv')])
         if file_path:
             self.data.to_csv(file_path, index=False, encoding='utf-8-sig')
+            logger.info(f'导出CSV成功：{file_path}，共 {len(self.data)} 条记录')
             messagebox.showinfo('导出成功', f'数据已导出到 {file_path}')
 
     def show_chart(self):
@@ -848,9 +917,22 @@ class RecordBook:
         if self.dirty:
             res = messagebox.askyesnocancel('未保存更改', '当前数据尚未保存，是否保存后退出？')
             if res is None:
+                logger.info('用户取消退出')
                 return  # 取消
             elif res:
+                logger.info('用户选择保存后退出')
                 self.save_data()
+            else:
+                logger.info('用户选择不保存直接退出')
+        # 关闭数据库连接
+        if self.conn:
+            try:
+                self.conn.close()
+                self.conn = None
+                logger.debug('数据库连接已关闭')
+            except Exception as e:
+                logger.warning(f'关闭数据库连接时出错: {e}')
+        logger.info('应用窗口关闭')
         try:
             self.master.destroy()
             # 强制退出所有Tk窗口和主进程

@@ -3,6 +3,7 @@ venv/
 load_path/
 ui/__pycache__/
 database/
+logs/
 
 # 忽略所有Python编译缓存文件
 *.pyc

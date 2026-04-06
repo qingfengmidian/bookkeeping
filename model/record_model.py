@@ -1,6 +1,25 @@
 import pandas as pd
 
-def process_monthly(df):
+
+def process_monthly(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    按月汇总收支数据。
+    
+    Args:
+        df: 原始账单DataFrame，包含列：日期、类型、金额
+        
+    Returns:
+        月度汇总透视表，列包含：收入、支出、总收入、总支出
+        索引为年月(YYYY-MM格式)
+        
+    Example:
+        >>> df = pd.DataFrame({
+        ...     '日期': ['2025-01-01', '2025-01-02'],
+        ...     '类型': ['收入', '支出'],
+        ...     '金额': [1000.0, 50.0]
+        ... })
+        >>> monthly = process_monthly(df)
+    """
     if df.empty:
         return pd.DataFrame()
     df = df.copy()
@@ -11,7 +30,26 @@ def process_monthly(df):
     monthly['总支出'] = monthly.get('支出', 0)
     return monthly
 
-def process_detail(df, month):
+
+def process_detail(df: pd.DataFrame, month: str) -> pd.DataFrame:
+    """
+    获取指定月份的明细数据。
+    
+    Args:
+        df: 原始账单DataFrame
+        month: 目标月份，格式为'YYYY-MM'
+        
+    Returns:
+        指定月份的明细DataFrame
+        
+    Example:
+        >>> df = pd.DataFrame({
+        ...     '日期': ['2025-01-01', '2025-02-01'],
+        ...     '类型': ['收入', '支出'],
+        ...     '金额': [1000.0, 50.0]
+        ... })
+        >>> jan_data = process_detail(df, '2025-01')
+    """
     if df.empty:
         return pd.DataFrame()
     df = df.copy()
