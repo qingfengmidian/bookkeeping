@@ -1,3 +1,5 @@
+
+
 import tkinter as tk
 from ui.main_window import RecordBook
 from utils.logger import setup_logging, get_logger
