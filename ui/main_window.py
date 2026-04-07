@@ -476,6 +476,7 @@ class RecordBook:
             self.dirty = False
             self.data = self.load_data()
             self.refresh_table()
+            self.update_db_path_display()
         except sqlite3.Error as e:
             messagebox.showerror('保存失败', f'数据库错误: {e}')
         except Exception as e:
@@ -509,6 +510,7 @@ class RecordBook:
         self.data = self.load_data()
         self.dirty = False
         self.refresh_table()
+        self.update_db_path_display()
         messagebox.showinfo('新建成功', f'已创建新的数据库：{self.db_path}')
 
     def open_db(self):
@@ -534,6 +536,7 @@ class RecordBook:
         self.data = self.load_data()
         self.refresh_table()
         self.dirty = False
+        self.update_db_path_display()
         messagebox.showinfo('打开成功', f'已打开数据库：{self.db_path}')
 
     def create_widgets(self):
@@ -616,6 +619,12 @@ class RecordBook:
 
         self.stats_label = ttk.Label(stats_frame, text='')
         self.stats_label.pack(side='left', padx=10)
+        
+        # 当前数据库路径显示
+        self.db_path_label = ttk.Label(stats_frame, text='', foreground='gray')
+        self.db_path_label.pack(side='right', padx=10)
+        self.update_db_path_display()
+        
         # 已去除右下角显示图表按钮
 
 
@@ -676,6 +685,20 @@ class RecordBook:
         income = self.data[self.data['类型'] == '收入']['金额'].sum()
         expense = self.data[self.data['类型'] == '支出']['金额'].sum()
         self.stats_label.config(text=f'总收入: {income:.2f} 元    总支出: {expense:.2f} 元')
+
+    def update_db_path_display(self):
+        """更新当前数据库路径显示"""
+        # 将路径转换为绝对路径显示，更直观
+        abs_path = os.path.abspath(self.db_path)
+        # 如果路径太长，显示后半部分
+        max_len = 50
+        if len(abs_path) > max_len:
+            display_path = '...' + abs_path[-(max_len-3):]
+        else:
+            display_path = abs_path
+        self.db_path_label.config(text=f'当前数据库: {display_path}')
+        # 添加悬浮提示显示完整路径
+        self.db_path_label.tooltip_text = abs_path
 
     # 存储当前筛选条件
     def apply_filter(self, filter_dict=None):
