@@ -4,7 +4,6 @@
 提供应用级别的日志配置和获取日志记录器功能。
 """
 import logging
-import sys
 from pathlib import Path
 
 # 日志格式
@@ -21,7 +20,7 @@ LOG_FILE = LOG_DIR / 'bookkeeping.log'
 
 def setup_logging(level: int = DEFAULT_LEVEL) -> None:
     """
-    配置应用日志。
+    配置应用日志，仅保存到文件，不输出到终端。
     
     Args:
         level: 日志级别，默认为INFO
@@ -29,16 +28,14 @@ def setup_logging(level: int = DEFAULT_LEVEL) -> None:
     # 确保日志目录存在
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     
-    # 配置根日志记录器
+    # 配置根日志记录器，仅使用文件处理器
     logging.basicConfig(
         level=level,
         format=LOG_FORMAT,
         datefmt=DATE_FORMAT,
         handlers=[
-            # 文件处理器
-            logging.FileHandler(LOG_FILE, encoding='utf-8', mode='a'),
-            # 控制台处理器
-            logging.StreamHandler(sys.stdout)
+            # 仅文件处理器，不输出到终端
+            logging.FileHandler(LOG_FILE, encoding='utf-8', mode='a')
         ]
     )
     
