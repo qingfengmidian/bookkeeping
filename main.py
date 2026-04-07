@@ -1,4 +1,21 @@
+"""
+记账本程序 - 主入口模块
 
+本模块是记账本应用程序的入口点，负责初始化日志系统和启动主窗口。
+
+功能:
+    - 初始化应用日志系统
+    - 创建并启动 Tkinter 主窗口
+    - 异常处理和日志记录
+
+使用方式:
+    直接运行: python main.py
+    或在虚拟环境中: .\venv\Scripts\python main.py
+
+作者: AI Assistant
+日期: 2026-04-06
+版本: v1.1
+"""
 
 import tkinter as tk
 from ui.main_window import RecordBook
