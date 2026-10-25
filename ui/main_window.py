@@ -235,13 +235,13 @@ class RecordBook:
             # 字段重命名
             df = df.rename(columns={v: k for k, v in col_map.items()})
             
-            # 数据标准化
-            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
-            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
-            
-            # 应用自动转换（如支付宝/微信特殊处理）
+            # 应用自动转换（如支付宝/微信特殊处理），需在数据标准化之前处理原始字符串格式
             if auto_transform:
                 df = auto_transform(df)
+            
+            # 数据标准化（放在转换之后，避免微信金额等原始格式被提前破坏）
+            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce').dt.strftime('%Y-%m-%d')
             
             # 弹出预览对话框
             preview_df = df[['日期', '类型', '分类', '金额', '备注']]
@@ -338,9 +338,12 @@ class RecordBook:
     def _build_wechat_mapping(self, columns: list) -> dict:
         """构建微信账单的默认列映射"""
         default_map = {}
-        for std, wechat in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易对方','金额（元）','商品']):
+        for std, wechat in zip(['日期','类型','分类','金额','备注'], ['交易时间','收/支','交易对方','金额(元)','商品']):
             if wechat in columns:
                 default_map[std] = wechat
+        # 兼容全角括号写法 金额（元）
+        if '金额' not in default_map and '金额（元）' in columns:
+            default_map['金额'] = '金额（元）'
         # 兼容英文账单
         alt_map = {'日期':'Date','类型':'Type','分类':'Category','金额':'Amount','备注':'Description'}
         for std, alt in alt_map.items():
@@ -350,8 +353,8 @@ class RecordBook:
     
     def _transform_wechat_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """微信数据自动转换"""
-        # 去除金额中的¥符号
-        df['金额'] = df['金额'].str.replace('¥', '')
+        # 去除金额中的¥/￥符号并转数值（先转字符串，兼容已是数值类型的列）
+        df['金额'] = df['金额'].astype(str).str.replace('¥', '', regex=False).str.replace('￥', '', regex=False)
         df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
         df['类型'] = df['类型'].map(lambda x: '收入' if str(x).strip() == '收入' else '支出')
         df['分类'] = df['分类'].fillna('微信')
@@ -359,7 +362,7 @@ class RecordBook:
         return df
 
     def import_wechat_excel(self):
-        file_path = filedialog.askopenfilename(title='选择微信账单Excel文件', filetypes=[('Excel文件', '*.xls;*.xlsx')])
+        file_path = filedialog.askopenfilename(title='选择微信账单Excel文件', filetypes=[('Excel文件', '*.xls *.xlsx')])
         if not file_path:
             return
         try:

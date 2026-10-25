@@ -405,3 +405,170 @@ class TestImportTransforms:
         assert result['分类'].tolist() == ['微信', '餐饮']
         # 备注保持字符串
         assert result['备注'].tolist() == ['红包', '晚餐']
+
+
+class TestWechatImportFixes:
+    """回归测试：微信账单导入的两个历史 bug（金额列映射半角/全角、¥符号被提前数值化）"""
+
+    def _make_record_book(self):
+        """绕过 __init__ 构造 RecordBook 实例"""
+        from ui.main_window import RecordBook
+        return object.__new__(RecordBook)
+
+    def test_build_wechat_mapping_half_width_amount(self):
+        """真实微信账单表头为半角 金额(元)，默认映射必须包含金额列"""
+        rb = self._make_record_book()
+        columns = ['交易时间', '交易类型', '交易对方', '商品', '收/支', '金额(元)',
+                   '支付方式', '当前状态', '交易单号', '商户单号', '备注']
+        m = rb._build_wechat_mapping(columns)
+        assert m.get('金额') == '金额(元)'
+        assert m.get('日期') == '交易时间'
+        assert m.get('类型') == '收/支'
+        assert m.get('分类') == '交易对方'
+        assert m.get('备注') == '商品'
+
+    def test_build_wechat_mapping_full_width_fallback(self):
+        """全角 金额（元）写法仍能映射（向后兼容）"""
+        rb = self._make_record_book()
+        m = rb._build_wechat_mapping(['交易时间', '收/支', '交易对方', '商品', '金额（元）'])
+        assert m.get('金额') == '金额（元）'
+
+    def test_transform_wechat_numeric_amount(self):
+        """金额列已是数值类型时不抛异常，值保持不变"""
+        rb = self._make_record_book()
+        df = pd.DataFrame({
+            '金额': [14.91, 20.0],
+            '类型': ['支出', '收入'],
+            '分类': [None, None],
+            '备注': ['a', 'b'],
+        })
+        result = rb._transform_wechat_data(df)
+        assert result['金额'].tolist() == [14.91, 20.0]
+
+    def test_transform_wechat_full_width_yen(self):
+        """全角￥符号同样能被去除"""
+        rb = self._make_record_book()
+        df = pd.DataFrame({
+            '金额': ['￥100.50'],
+            '类型': ['支出'],
+            '分类': [None],
+            '备注': ['a'],
+        })
+        result = rb._transform_wechat_data(df)
+        assert result['金额'].tolist() == [100.5]
+
+    def test_parse_and_import_wechat_yen_end_to_end(self):
+        """端到端：含¥金额的微信数据经完整导入流程后金额为数值而非 NaN"""
+        rb = self._make_record_book()
+        rb.master = MagicMock()
+        rb.default_font = None
+        rb.data = pd.DataFrame(columns=['日期', '类型', '分类', '金额', '备注'])
+        rb.dirty = False
+
+        df = pd.DataFrame({
+            '交易时间': ['2025-07-01 12:00:00', '2025-07-02 18:00:00'],
+            '交易类型': ['商户消费', '转账'],
+            '交易对方': ['某快餐店', '张三'],
+            '商品': ['午餐', '红包'],
+            '收/支': ['支出', '收入'],
+            '金额(元)': ['¥14.91', '¥100.00'],
+        })
+        default_map = rb._build_wechat_mapping(list(df.columns))
+        assert '金额' in default_map  # 半角表头下默认映射完整，无需用户手动补金额列
+
+        captured = {}
+        def fake_preview(master, preview_df, font):
+            dlg = MagicMock()
+            dlg.result = True
+            dlg.data = preview_df
+            captured['df'] = preview_df
+            return dlg
+
+        with patch('ui.main_window.ImportMappingDialog') as mock_map_dialog, \
+                patch('ui.main_window.PreviewDialog', side_effect=fake_preview), \
+                patch('ui.main_window.messagebox'), \
+                patch.object(rb, 'refresh_table'):
+            mock_map_dialog.return_value.result = default_map
+            rb._parse_and_import(df, default_map, '微信账单', rb._transform_wechat_data)
+
+        preview = captured['df']
+        # 关键回归断言：¥ 金额被正确转换为数值，而不是在转换前被数值化成 NaN
+        assert preview['金额'].tolist() == [14.91, 100.0]
+        assert preview['类型'].tolist() == ['支出', '收入']
+        assert preview['日期'].tolist() == ['2025-07-01', '2025-07-02']
+        # 数据真正进入了账本
+        assert len(rb.data) == 2
+        assert rb.dirty is True
+        assert rb.data['金额'].tolist() == [14.91, 100.0]
+
+
+class TestEditDeleteRegression:
+    """回归测试：双击编辑（iloc/loc 错位 P0）与单条删除"""
+
+    def _make_record_book(self):
+        from ui.main_window import RecordBook
+        rb = object.__new__(RecordBook)
+        rb.master = MagicMock()
+        rb.default_font = None
+        return rb
+
+    def test_double_click_edit_non_contiguous_index(self):
+        """删除记录后索引不连续（如 [0,1,3]），双击 iid='3' 必须编辑标签3的记录"""
+        rb = self._make_record_book()
+        rb.data = pd.DataFrame([
+            {"日期": "2025-01-01", "类型": "支出", "分类": "餐饮", "金额": 50.0, "备注": "a"},
+            {"日期": "2025-01-02", "类型": "支出", "分类": "交通", "金额": 30.0, "备注": "b"},
+            {"日期": "2025-01-03", "类型": "支出", "分类": "购物", "金额": 80.0, "备注": "c"},
+        ], index=[0, 1, 3])  # 模拟删除一条后的非连续索引
+        rb.dirty = False
+        rb.tree = MagicMock()
+        rb.tree.identify_row.return_value = '3'
+
+        with patch('ui.main_window.EditRecordDialog') as mock_dlg, \
+                patch.object(rb, 'save_data') as mock_save, \
+                patch.object(rb, 'refresh_table'):
+            mock_dlg.return_value.result = {
+                '日期': '2025-01-03', '类型': '支出', '分类': '购物', '金额': '99.9', '备注': '改后'
+            }
+            rb.on_tree_double_click(MagicMock(y=10))
+
+        # 标签3的记录被修改，其余记录不受影响（旧实现 iloc[3] 会越界或改错行）
+        assert rb.data.loc[3, '金额'] == 99.9
+        assert rb.data.loc[3, '备注'] == '改后'
+        assert rb.data.loc[0, '金额'] == 50.0
+        assert rb.data.loc[1, '金额'] == 30.0
+        mock_save.assert_called_once()
+
+    def test_double_click_invalid_index_guarded(self):
+        """iid 不在索引中时安全返回，不弹编辑对话框"""
+        rb = self._make_record_book()
+        rb.data = pd.DataFrame([
+            {"日期": "2025-01-01", "类型": "支出", "分类": "餐饮", "金额": 50.0, "备注": "a"},
+        ])
+        rb.tree = MagicMock()
+        rb.tree.identify_row.return_value = '99'
+
+        with patch('ui.main_window.EditRecordDialog') as mock_dlg:
+            rb.on_tree_double_click(MagicMock(y=10))
+        mock_dlg.assert_not_called()
+
+    def test_delete_record_single(self):
+        """删除单条记录：确认后该行被移除，其余保留"""
+        rb = self._make_record_book()
+        rb.data = pd.DataFrame([
+            {"日期": "2025-01-01", "类型": "支出", "分类": "餐饮", "金额": 50.0, "备注": "a"},
+            {"日期": "2025-01-02", "类型": "支出", "分类": "交通", "金额": 30.0, "备注": "b"},
+            {"日期": "2025-01-03", "类型": "收入", "分类": "工资", "金额": 100.0, "备注": "c"},
+        ])
+        rb.dirty = False
+        rb.tree = MagicMock()
+        rb.tree.selection.return_value = ('1',)
+
+        with patch('ui.main_window.messagebox') as mock_msg, \
+                patch.object(rb, 'refresh_table'):
+            mock_msg.askyesno.return_value = True
+            rb.delete_record()
+
+        assert len(rb.data) == 2
+        assert 'b' not in rb.data['备注'].tolist()
+        assert rb.dirty is True
