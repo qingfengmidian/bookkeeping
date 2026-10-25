@@ -33,7 +33,7 @@
 ## 项目结构说明
 
 ```text
-windsurf/
+bookkeeping/
 ├─ main.py                # 主入口，仅负责启动程序
 ├─ db/
 │    └─ database.py       # 数据库相关操作（SQLite）
@@ -164,3 +164,9 @@ pytest
 - matplotlib >= 3.0
 - tkcalendar >= 1.6
 - openpyxl >= 3.0
+
+## 开源协议与作者
+
+本项目基于 [ISC License](LICENSE) 开源，作者：qingfengmidian（清风米店）。
+
+`examples/` 目录下的示例账单文件均为匿名化合成的演示数据，不包含任何真实个人信息，可用于体验 CSV / 支付宝 / 微信账单导入功能。
