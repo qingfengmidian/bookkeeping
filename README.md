@@ -1,6 +1,6 @@
-# 记账本程序（Windows 桌面版）
+# 记账本程序（跨平台桌面版）
 
-本项目是一个简洁高效的 Windows 桌面记账本程序，支持收入/支出账单管理、可视化统计与数据导出。适合个人日常财务记录与分析。
+本项目是一个简洁高效的跨平台桌面记账本程序（支持 Windows / macOS / Linux），支持收入/支出账单管理、可视化统计与数据导出。适合个人日常财务记录与分析。
 
 ## 功能简介
 
@@ -100,15 +100,34 @@ windsurf/
 
 ### 创建虚拟环境并安装依赖
 
+Windows（PowerShell）：
+
 ```bash
 python -m venv venv
 .\venv\Scripts\pip install -r requirements.txt
 ```
 
+macOS / Linux：
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+```
+
+> Linux 需先安装 tkinter 系统包，如 Ubuntu/Debian：`sudo apt install python3-tk`。
+
 ### 运行程序
+
+Windows：
 
 ```bash
 .\venv\Scripts\python main.py
+```
+
+macOS / Linux：
+
+```bash
+./venv/bin/python main.py
 ```
 
 程序启动后，日志将保存到 `logs/bookkeeping.log` 文件中。
@@ -116,13 +135,16 @@ python -m venv venv
 ### 执行测试用例
 
 ```bash
+# Windows
 .\venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
 pytest
 ```
 
 ## 技术特点
 
-- **安全性**：表名白名单验证，防止 SQL 注入
+- **安全性**：全部数据库写入使用参数化查询，防止 SQL 注入
 - **性能**：数据库批量插入优化（executemany），自动创建索引
 - **可维护性**：类型注解、文档字符串、模块化设计
 - **可测试性**：完整的单元测试覆盖（43个测试用例）

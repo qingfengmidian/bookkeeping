@@ -13,8 +13,8 @@ DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 # 默认日志级别
 DEFAULT_LEVEL = logging.INFO
 
-# 日志文件路径
-LOG_DIR = Path('./logs')
+# 日志文件路径（基于项目根目录定位，避免依赖运行时工作目录）
+LOG_DIR = Path(__file__).resolve().parent.parent / 'logs'
 LOG_FILE = LOG_DIR / 'bookkeeping.log'
 
 

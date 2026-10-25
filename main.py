@@ -12,9 +12,7 @@
     直接运行: python main.py
     或在虚拟环境中: .\venv\Scripts\python main.py
 
-作者: AI Assistant
 日期: 2026-04-06
-版本: v1.1
 """
 
 import tkinter as tk

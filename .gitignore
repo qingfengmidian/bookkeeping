@@ -10,3 +10,10 @@ logs/
 __pycache__/
 .pytest_cache/
 *.db
+
+test_env/
+.idea/
+.vscode/
+*.egg-info/
+build/
+dist/

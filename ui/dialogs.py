@@ -66,15 +66,6 @@ class FilterDialog(tk.Toplevel):
         btn_clear = ttk.Button(self, text='清除筛选', command=self.on_clear)
         btn_clear.grid(row=6, column=2, columnspan=1, pady=10, sticky='w')
 
-    def split_date(self, date_str, default_year, default_month, default_day):
-        try:
-            parts = [int(x) for x in date_str.split('-')]
-            if len(parts) == 3:
-                return parts[0], parts[1], parts[2]
-        except Exception:
-            pass
-        return default_year, default_month, default_day
-
     def on_ok(self):
         # 读取 DateEntry 的日期字符串（yyyy-mm-dd）
         start = self.start_var.get()

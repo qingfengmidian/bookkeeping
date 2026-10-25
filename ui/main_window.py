@@ -4,7 +4,7 @@ from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog, Prev
 from ui.charts import show_monthly_chart, show_single_month_pie, show_pie
 from db.database import ensure_db, create_table, load_data, save_data
 from model.record_model import process_monthly, process_detail
-from utils.constants import DB_DEFAULT, CATEGORIES, TABLE_RECORDS_SCHEMA, TABLE_NAME, ALLOWED_TABLES
+from utils.constants import DB_DEFAULT, CATEGORIES, TABLE_RECORDS_SCHEMA, TABLE_NAME, CJK_FONT_FALLBACK
 from utils.logger import get_logger
 import pandas as pd
 from tkcalendar import DateEntry
@@ -303,7 +303,7 @@ class RecordBook:
     
     def _transform_alipay_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """支付宝数据自动转换"""
-        df['类型'] = df['类型'].map(lambda x: '收入' if '入' in str(x) else '支出')
+        df['类型'] = df['类型'].map(lambda x: '收入' if str(x).strip() == '收入' else '支出')
         df['分类'] = df['分类'].fillna('支付宝')
         df['备注'] = df['备注'].astype(str)
         return df
@@ -353,7 +353,7 @@ class RecordBook:
         # 去除金额中的¥符号
         df['金额'] = df['金额'].str.replace('¥', '')
         df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
-        df['类型'] = df['类型'].map(lambda x: '收入' if '收入' in str(x) or '入账' in str(x) else '支出')
+        df['类型'] = df['类型'].map(lambda x: '收入' if str(x).strip() == '收入' else '支出')
         df['分类'] = df['分类'].fillna('微信')
         df['备注'] = df['备注'].astype(str)
         return df
@@ -446,10 +446,7 @@ class RecordBook:
         new_path = filedialog.asksaveasfilename(defaultextension='.db', filetypes=[('SQLite数据库', '*.db')])
         if not new_path:
             return
-        # 验证表名（防止SQL注入）
-        if TABLE_NAME not in ALLOWED_TABLES:
-            messagebox.showerror('错误', f'无效的表名: {TABLE_NAME}')
-            return
+        new_conn = None
         try:
             # 新建数据库并写入数据
             new_conn = sqlite3.connect(new_path)
@@ -468,19 +465,24 @@ class RecordBook:
                     data_tuples
                 )
             new_conn.commit()
-            new_conn.close()
-            self.db_path = new_path
-            self.conn.close()
-            self.conn = sqlite3.connect(self.db_path)
-            messagebox.showinfo('另存为成功', f'数据已另存为 {self.db_path}')
-            self.dirty = False
-            self.data = self.load_data()
-            self.refresh_table()
-            self.update_db_path_display()
         except sqlite3.Error as e:
             messagebox.showerror('保存失败', f'数据库错误: {e}')
+            return
         except Exception as e:
             messagebox.showerror('保存失败', f'保存过程中发生错误: {e}')
+            return
+        finally:
+            # 无论成功失败都关闭新库连接，避免连接泄漏
+            if new_conn is not None:
+                new_conn.close()
+        self.db_path = new_path
+        self.conn.close()
+        self.conn = sqlite3.connect(self.db_path)
+        messagebox.showinfo('另存为成功', f'数据已另存为 {self.db_path}')
+        self.dirty = False
+        self.data = self.load_data()
+        self.refresh_table()
+        self.update_db_path_display()
 
     def new_db(self):
         # 新建一个空数据库文件
@@ -528,10 +530,17 @@ class RecordBook:
         )
         if not db_path:
             return
+        try:
+            # 先尝试连接新数据库，成功后再关闭旧连接，避免切换失败导致状态损坏
+            new_conn = sqlite3.connect(db_path)
+        except sqlite3.Error as e:
+            logger.error(f'打开数据库失败: {e}')
+            messagebox.showerror('打开失败', f'无法打开数据库：{e}')
+            return
         if self.conn:
             self.conn.close()
         self.db_path = db_path
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = new_conn
         self.create_table()
         self.data = self.load_data()
         self.refresh_table()
@@ -639,12 +648,10 @@ class RecordBook:
         except ValueError:
             logger.warning(f'添加记录失败：金额格式错误 - {amount}')
             messagebox.showerror('输入错误', '金额必须为数字')
-            messagebox.showerror('添加失败', '账单添加失败，金额必须为数字')
             return
         if not date or not type_ or not cat:
             logger.warning('添加记录失败：信息不完整')
             messagebox.showerror('输入错误', '请填写完整信息')
-            messagebox.showerror('添加失败', '账单添加失败，请填写完整信息')
             return
         try:
             # 日期格式化
@@ -680,10 +687,11 @@ class RecordBook:
         self.update_stats()
 
     def update_stats(self):
-        # 确保金额列为数字类型，防止格式化报错
-        self.data['金额'] = pd.to_numeric(self.data['金额'], errors='coerce').fillna(0)
-        income = self.data[self.data['类型'] == '收入']['金额'].sum()
-        expense = self.data[self.data['类型'] == '支出']['金额'].sum()
+        # 在局部副本上计算统计，避免把 NaN 改写为 0 污染 self.data 后被保存
+        df = self.data.copy()
+        df['金额'] = pd.to_numeric(df['金额'], errors='coerce').fillna(0)
+        income = df[df['类型'] == '收入']['金额'].sum()
+        expense = df[df['类型'] == '支出']['金额'].sum()
         self.stats_label.config(text=f'总收入: {income:.2f} 元    总支出: {expense:.2f} 元')
 
     def update_db_path_display(self):
@@ -766,37 +774,22 @@ class RecordBook:
                 return
             try:
                 top.event_generate('<Escape>')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f'关闭日期弹窗时出错: {e}')
             try:
                 for child in top.winfo_children():
                     try:
                         child.event_generate('<Escape>')
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logger.warning(f'关闭日期弹窗时出错: {e}')
+            except Exception as e:
+                logger.warning(f'关闭日期弹窗时出错: {e}')
             try:
                 top.withdraw()
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    def _on_escape(self, event=None):
-        try:
-            w = self.master.focus_get()
-            if isinstance(w, DateEntry):
-                self._close_date_popup(w)
-                return 'break'
-        except Exception:
-            pass
-        try:
-            if hasattr(self, 'date_entry'):
-                self._close_date_popup(self.date_entry)
-        except Exception:
-            pass
-        return 'break'
+            except Exception as e:
+                logger.warning(f'关闭日期弹窗时出错: {e}')
+        except Exception as e:
+            logger.warning(f'关闭日期弹窗时出错: {e}')
 
     def _on_de_escape(self, de: DateEntry):
         try:
@@ -819,7 +812,11 @@ class RecordBook:
         if not item_id:
             return
         idx = int(item_id)
-        record = self.data.iloc[idx].to_dict()
+        # 筛选态下 iid 是原始索引标签，按标签取值防止 iloc 按位置错位
+        if idx not in self.data.index:
+            logger.warning(f'编辑记录失败：索引 {idx} 不在当前数据中，已取消编辑')
+            return
+        record = self.data.loc[idx].to_dict()
         dialog = EditRecordDialog(self.master, record, self.default_font)
         self.master.wait_window(dialog)
         if dialog.result:
@@ -893,8 +890,16 @@ class RecordBook:
         canvas2 = FigureCanvasTkAgg(fig2, master=tab2)
         canvas2.draw()
         canvas2.get_tk_widget().pack(fill='both', expand=True)
+        # 图表窗口销毁时关闭 figure，防止 matplotlib figure 泄漏
+        def on_chart_window_destroy(event):
+            plt.close(fig1)
+            plt.close(fig2)
+        self.chart_window.bind('<Destroy>', on_chart_window_destroy)
 
     def plot_trend(self):
+        # 设置中文字体，避免图表标题/坐标轴中文显示为方块
+        plt.rcParams['font.sans-serif'] = CJK_FONT_FALLBACK  # 中文字体按平台回退选择
+        plt.rcParams['axes.unicode_minus'] = False
         df = self.data.copy()
         if df.empty:
             fig, ax = plt.subplots()
@@ -913,6 +918,9 @@ class RecordBook:
         return fig
 
     def plot_category(self):
+        # 设置中文字体，避免图表标题中文显示为方块
+        plt.rcParams['font.sans-serif'] = CJK_FONT_FALLBACK  # 中文字体按平台回退选择
+        plt.rcParams['axes.unicode_minus'] = False
         df = self.data.copy()
         if df.empty:
             fig, ax = plt.subplots()
@@ -937,29 +945,31 @@ class RecordBook:
         return fig
 
     def on_close(self):
-        if self.dirty:
-            res = messagebox.askyesnocancel('未保存更改', '当前数据尚未保存，是否保存后退出？')
-            if res is None:
-                logger.info('用户取消退出')
-                return  # 取消
-            elif res:
-                logger.info('用户选择保存后退出')
-                self.save_data()
-            else:
-                logger.info('用户选择不保存直接退出')
-        # 关闭数据库连接
-        if self.conn:
-            try:
-                self.conn.close()
-                self.conn = None
-                logger.debug('数据库连接已关闭')
-            except Exception as e:
-                logger.warning(f'关闭数据库连接时出错: {e}')
-        logger.info('应用窗口关闭')
         try:
-            self.master.destroy()
-            # 强制退出所有Tk窗口和主进程
-            import sys
-            sys.exit(0)
-        except Exception:
-            os._exit(0)
+            if self.dirty:
+                res = messagebox.askyesnocancel('未保存更改', '当前数据尚未保存，是否保存后退出？')
+                if res is None:
+                    logger.info('用户取消退出')
+                    return  # 取消
+                elif res:
+                    logger.info('用户选择保存后退出')
+                    self.save_data()
+                else:
+                    logger.info('用户选择不保存直接退出')
+            # 关闭数据库连接
+            if self.conn:
+                try:
+                    self.conn.close()
+                    self.conn = None
+                    logger.debug('数据库连接已关闭')
+                except Exception as e:
+                    logger.warning(f'关闭数据库连接时出错: {e}')
+        except Exception as e:
+            logger.error(f'退出清理时发生错误: {e}')
+        finally:
+            logger.info('应用窗口关闭')
+            # 销毁窗口后 mainloop 会自然结束，不再强制退出进程
+            try:
+                self.master.destroy()
+            except Exception as e:
+                logger.warning(f'销毁窗口时出错: {e}')

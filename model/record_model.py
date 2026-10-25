@@ -23,7 +23,8 @@ def process_monthly(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     df = df.copy()
-    df['日期'] = pd.to_datetime(df['日期'])
+    df['日期'] = pd.to_datetime(df['日期'], errors='coerce', format='mixed')
+    df = df.dropna(subset=['日期'])
     df['年月'] = df['日期'].dt.to_period('M').astype(str)
     monthly = df.pivot_table(index='年月', columns='类型', values='金额', aggfunc='sum', fill_value=0)
     monthly['总收入'] = monthly.get('收入', 0)
@@ -53,6 +54,7 @@ def process_detail(df: pd.DataFrame, month: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     df = df.copy()
-    df['日期'] = pd.to_datetime(df['日期'])
+    df['日期'] = pd.to_datetime(df['日期'], errors='coerce', format='mixed')
+    df = df.dropna(subset=['日期'])
     df['年月'] = df['日期'].dt.to_period('M').astype(str)
     return df[df['年月'] == month]

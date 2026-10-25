@@ -1,19 +1,6 @@
-# Tkinter comes with Python standard library (no need to install)
-babel
-contourpy
-cycler
-fonttools
-kiwisolver
+# Tkinter 随 Python 标准库提供，无需安装
 matplotlib
-numpy
 openpyxl
-packaging
 pandas
-pillow
 pytest
-python-dateutil
-pytz
-setuptools
-six
 tkcalendar
-tzdata

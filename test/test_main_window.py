@@ -47,11 +47,12 @@ class TestRecordBookCoreLogic:
                                                         rb.stats_label = MagicMock()
                                                         
                                                         rb.update_stats()
-                                                        
-                                                        # 验证统计标签被调用，总收入1000，总支出80
+
+                                                        # 验证统计标签被调用一次，且文本包含正确的总收入/总支出
                                                         rb.stats_label.config.assert_called_once()
-                                                        call_args = rb.stats_label.config.call_args
-                                                        assert 'text' in call_args.kwargs or call_args[1]
+                                                        text = rb.stats_label.config.call_args.kwargs.get('text', '')
+                                                        assert '1000' in text  # 总收入 1000 元
+                                                        assert '80' in text    # 总支出 80 元（50 + 30）
 
 
 class TestRecordBookDataOperations:
@@ -143,6 +144,14 @@ class TestRecordBookDataOperations:
                                                         rb.apply_filter(filter_dict)
                                                         # 验证 refresh_table 被调用
                                                         mock_refresh.assert_called_once()
+                                                        # apply_filter 将筛选结果作为 filtered_df 传给 refresh_table，self.data 保持不变
+                                                        filtered = mock_refresh.call_args.kwargs['filtered_df']
+                                                        assert len(filtered) == 1
+                                                        assert filtered.iloc[0]['日期'] == '2025-02-01'
+                                                        assert filtered.iloc[0]['类型'] == '支出'
+                                                        assert filtered.iloc[0]['金额'] == 60.0
+                                                        # 原始数据未被修改
+                                                        assert len(rb.data) == 3
 
     def test_apply_filter_by_type(self):
         """测试按类型筛选"""
@@ -185,6 +194,14 @@ class TestRecordBookDataOperations:
                                                     with patch.object(rb, 'refresh_table') as mock_refresh:
                                                         rb.apply_filter(filter_dict)
                                                         mock_refresh.assert_called_once()
+                                                        # apply_filter 将筛选结果作为 filtered_df 传给 refresh_table
+                                                        filtered = mock_refresh.call_args.kwargs['filtered_df']
+                                                        assert len(filtered) == 1
+                                                        assert filtered.iloc[0]['类型'] == '收入'
+                                                        assert filtered.iloc[0]['分类'] == '工资'
+                                                        assert filtered.iloc[0]['金额'] == 1000.0
+                                                        # 原始数据未被修改
+                                                        assert len(rb.data) == 2
 
     def test_clear_filter(self):
         """测试清除筛选"""
@@ -332,3 +349,59 @@ class TestRecordBookSort:
                                                         rb.sort_by_column('日期')
                                                         assert rb._sort_column == '日期'
                                                         assert rb._sort_asc is False
+
+
+class TestImportTransforms:
+    """测试支付宝/微信账单的自动数据转换（_transform_alipay_data / _transform_wechat_data）"""
+
+    def _make_record_book(self):
+        """绕过 __init__ 构造 RecordBook 实例（转换函数不依赖实例状态）"""
+        from ui.main_window import RecordBook
+        return object.__new__(RecordBook)
+
+    def test_transform_alipay_data(self):
+        """支付宝：' 收入 ' 带空格值 strip 后判为收入，分类空值填充为'支付宝'"""
+        rb = self._make_record_book()
+        # 模拟列映射重命名后的支付宝账单（原始'收/支'列已映射到'类型'列）
+        df = pd.DataFrame({
+            '交易时间': ['2025-07-01 12:00:00', '2025-07-02 08:30:00', '2025-07-03 18:00:00'],
+            '类型': ['收入', ' 收入 ', '不计收支'],
+            '分类': ['工资', None, '餐饮'],
+            '金额': [1000.0, 200.0, 50.0],
+            '备注': ['工资到账', '奖金', '午餐'],
+        })
+
+        result = rb._transform_alipay_data(df)
+
+        # 类型映射：'收入'和带空格的' 收入 '都判为收入，其余值一律判为支出
+        assert result['类型'].tolist() == ['收入', '收入', '支出']
+        # 分类空值填充为'支付宝'
+        assert result['分类'].tolist() == ['工资', '支付宝', '餐饮']
+        # 备注转为字符串
+        assert result['备注'].tolist() == ['工资到账', '奖金', '午餐']
+        # 未被转换引用的列（交易时间、金额）保持原样
+        assert result['交易时间'].tolist() == ['2025-07-01 12:00:00', '2025-07-02 08:30:00', '2025-07-03 18:00:00']
+        assert result['金额'].tolist() == [1000.0, 200.0, 50.0]
+
+    def test_transform_wechat_data(self):
+        """微信：金额去除¥符号转数值，类型映射正确，分类空值填充为'微信'"""
+        rb = self._make_record_book()
+        # 模拟列映射重命名后的微信账单（原始'收/支'列已映射到'类型'列，金额含¥符号）
+        df = pd.DataFrame({
+            '交易时间': ['2025-07-01 12:00:00', '2025-07-02 18:00:00'],
+            '类型': ['收入', '支出'],
+            '分类': [None, '餐饮'],
+            '金额': ['¥100.50', '¥50.00'],
+            '备注': ['红包', '晚餐'],
+        })
+
+        result = rb._transform_wechat_data(df)
+
+        # 金额去除¥符号并转为数值
+        assert result['金额'].tolist() == [100.5, 50.0]
+        # 类型映射正确
+        assert result['类型'].tolist() == ['收入', '支出']
+        # 分类空值填充为'微信'
+        assert result['分类'].tolist() == ['微信', '餐饮']
+        # 备注保持字符串
+        assert result['备注'].tolist() == ['红包', '晚餐']

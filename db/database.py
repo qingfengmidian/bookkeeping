@@ -1,3 +1,4 @@
+import contextlib
 import sqlite3
 import pandas as pd
 import os
@@ -12,9 +13,8 @@ def ensure_db(db_path: str) -> None:
         db_path: 数据库文件路径
     """
     if not os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
-        create_table(conn)
-        conn.close()
+        with contextlib.closing(sqlite3.connect(db_path)) as conn:
+            create_table(conn)
 
 
 def create_table(conn: sqlite3.Connection) -> None:
@@ -45,15 +45,14 @@ def load_data(db_path: str) -> pd.DataFrame:
     Returns:
         包含所有记录的DataFrame，列为：日期、类型、分类、金额、备注
     """
-    conn = sqlite3.connect(db_path)
-    create_table(conn)
-    c = conn.cursor()
-    c.execute('SELECT 日期, 类型, 分类, 金额, 备注 FROM records')
-    rows = c.fetchall()
-    df = pd.DataFrame(rows, columns=['日期', '类型', '分类', '金额', '备注'])
-    if not df.empty:
-        df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
-    conn.close()
+    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+        create_table(conn)
+        c = conn.cursor()
+        c.execute(f'SELECT 日期, 类型, 分类, 金额, 备注 FROM {TABLE_NAME}')
+        rows = c.fetchall()
+        df = pd.DataFrame(rows, columns=['日期', '类型', '分类', '金额', '备注'])
+        if not df.empty:
+            df['金额'] = pd.to_numeric(df['金额'], errors='coerce')
     return df
 
 

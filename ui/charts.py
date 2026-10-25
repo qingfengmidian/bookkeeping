@@ -5,9 +5,11 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 
+from utils.constants import CJK_FONT_FALLBACK
+
 def show_monthly_chart(df, master):
     import matplotlib
-    matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 设置中文字体为微软雅黑
+    matplotlib.rcParams['font.sans-serif'] = CJK_FONT_FALLBACK  # 中文字体按平台回退选择
     matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
     if df.empty:
         messagebox.showinfo('无数据', '没有可统计的账单数据。')
@@ -40,11 +42,12 @@ def show_monthly_chart(df, master):
 def show_single_month_pie(df, master):
     # 选择月份，绘制该月的收入/支出分类饼状图
     import matplotlib
-    matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei']  # 设置中文字体为微软雅黑
+    matplotlib.rcParams['font.sans-serif'] = CJK_FONT_FALLBACK  # 中文字体按平台回退选择
     matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
     if df.empty:
         messagebox.showinfo('无数据', '没有可统计的账单数据。')
         return
+    df = df.copy()
     df['日期'] = pd.to_datetime(df['日期'])
     df['年月'] = df['日期'].dt.to_period('M').astype(str)
     months = sorted(df['年月'].unique())
@@ -69,6 +72,11 @@ def draw_pie(month, df, master, win=None):
         win = tk.Toplevel(master)
     win.title(f'{month} 收支分类饼状图')
     win.geometry('750x480')
+    # 关闭上一次绘制的 figure，防止切换月份时 matplotlib figure 泄漏
+    old_fig = getattr(win, '_pie_fig', None)
+    if old_fig is not None:
+        plt.close(old_fig)
+        win._pie_fig = None
     # 清空内容
     for widget in win.winfo_children():
         widget.destroy()
@@ -97,9 +105,19 @@ def draw_pie(month, df, master, win=None):
     else:
         axs[1].text(0.5, 0.5, '无收入数据', ha='center', va='center')
     plt.tight_layout()
+    win._pie_fig = fig  # 保存引用，供切换月份时关闭旧图、窗口销毁时释放
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.draw()
     canvas.get_tk_widget().pack(fill='both', expand=True)
+    # 窗口销毁时关闭当前 figure，防止泄漏
+    def _on_pie_win_destroy(event, _win=win):
+        fig = getattr(_win, '_pie_fig', None)
+        if fig is not None:
+            plt.close(fig)
+            _win._pie_fig = None
+    if not getattr(win, '_pie_destroy_bound', False):
+        win.bind('<Destroy>', _on_pie_win_destroy)
+        win._pie_destroy_bound = True
     # 底部左右按钮
     nav_frame = ttk.Frame(win)
     nav_frame.pack(fill='x', pady=8)
