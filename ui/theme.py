@@ -26,8 +26,26 @@ TOTAL_EXPENSE = '#B91C1C' # 统计栏"总支出"大数字专用砖红（记账�
 ROW_STRIPE = '#F1EEE6'    # 表格斑马行（可见的暖米间隔）
 ROW_SELECTED = '#E7E2D6'  # 表格选中行（暖灰米，中性无彩色）
 
+# 分类图表低饱和暖系色板（设计稿 4.3）：6 色，基于暖纸墨绿红主色系推导，
+# 同系低饱和、色相邻近可区分；饼图/分类图按序取色，替换 matplotlib 默认蓝橙绿
+CHART_PALETTE = [
+    '#4D7C0F',  # 橄榄绿（收入同系）
+    '#C7B99A',  # 沙色（暖米陶土）
+    '#57534E',  # 深暖灰
+    '#8A9A5B',  # 浅橄榄（橄榄绿提亮降饱和）
+    '#A8A29E',  # 暖灰（次要文字同系）
+    '#1C1B1A',  # 墨色（主文字同系）
+]
+
 # 跨平台字体栈（设计稿第三节，替代写死的"微软雅黑"）
 FONT_FAMILY = ['Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'Microsoft YaHei UI', '微软雅黑', 'Noto Sans CJK SC', 'sans-serif']
+
+
+# matplotlib 图表中文字体回退链：matplotlib 的 font_manager 只认英文族名，
+# 不能直接用 Tk 的族名（中文系统上 Tk 报"微软雅黑"，matplotlib 不认识会回退到
+# DejaVu Sans 导致中文缺字）；按序取第一个 matplotlib 可解析的字体
+MPL_FONT_FALLBACK = ['Microsoft YaHei', 'SimHei', 'PingFang SC', 'Hiragino Sans GB',
+                     'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'DejaVu Sans', 'sans-serif']
 
 
 def pick_font_family():

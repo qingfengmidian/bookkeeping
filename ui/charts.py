@@ -5,12 +5,34 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 
-from utils.constants import CJK_FONT_FALLBACK
+from ui.theme import (BORDER, TEXT, TEXT_MUTED, INCOME, EXPENSE,
+                      CHART_PALETTE, MPL_FONT_FALLBACK)
+
+
+def _setup_matplotlib():
+    """图表中文字体与负号设置（设计稿 4.3）：字体取 matplotlib 专用的跨平台回退链"""
+    import matplotlib
+    matplotlib.rcParams['font.sans-serif'] = MPL_FONT_FALLBACK
+    matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
+
+
+def _style_axes(ax, grid=True):
+    """图表装饰统一（设计稿 4.3）：白底、隐藏上/右边框，网格线仅 Y 轴、虚线、BORDER 色"""
+    ax.set_facecolor('white')
+    # 隐藏上/右边框，剩余边框用 BORDER 暖灰发丝线
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color(BORDER)
+    ax.spines['bottom'].set_color(BORDER)
+    ax.tick_params(colors=TEXT_MUTED, labelsize=10)
+    if grid:
+        ax.yaxis.grid(True, linestyle='--', linewidth=0.8, color=BORDER)
+        ax.xaxis.grid(False)
+        ax.set_axisbelow(True)  # 网格线置于柱体之下
+
 
 def show_monthly_chart(df, master):
-    import matplotlib
-    matplotlib.rcParams['font.sans-serif'] = CJK_FONT_FALLBACK  # 中文字体按平台回退选择
-    matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
+    _setup_matplotlib()
     if df.empty:
         messagebox.showinfo('无数据', '没有可统计的账单数据。')
         return
@@ -22,14 +44,18 @@ def show_monthly_chart(df, master):
     income = monthly['收入'] if '收入' in monthly.columns else [0]*len(months)
     expense = monthly['支出'] if '支出' in monthly.columns else [0]*len(months)
     fig, ax = plt.subplots(figsize=(8,5))
+    fig.patch.set_facecolor('white')  # 图表背景与窗口协调（设计稿 4.3）：纯白底
     x = range(len(months))
-    ax.bar(x, income, width=0.4, label='收入', align='center')
-    ax.bar([i+0.4 for i in x], expense, width=0.4, label='支出', align='center')
+    # 收入柱=INCOME 橄榄绿、支出柱=EXPENSE 墨色（设计稿 4.3）
+    ax.bar(x, income, width=0.4, label='收入', align='center', color=INCOME)
+    ax.bar([i+0.4 for i in x], expense, width=0.4, label='支出', align='center', color=EXPENSE)
     ax.set_xticks([i+0.2 for i in x])
     ax.set_xticklabels(months, rotation=45)
-    ax.set_ylabel('金额')
-    ax.set_title('每月收入与支出变化')
-    ax.legend()
+    _style_axes(ax, grid=True)
+    ax.set_ylabel('金额', color=TEXT_MUTED)
+    # 标题 14px 左对齐（设计稿 4.3）
+    ax.set_title('每月收入与支出变化', fontsize=14, loc='left', color=TEXT)
+    ax.legend(frameon=False)
     plt.tight_layout()
     win = tk.Toplevel(master)
     win.title('每月收支柱状图')
@@ -41,9 +67,7 @@ def show_monthly_chart(df, master):
 
 def show_single_month_pie(df, master):
     # 选择月份，绘制该月的收入/支出分类饼状图
-    import matplotlib
-    matplotlib.rcParams['font.sans-serif'] = CJK_FONT_FALLBACK  # 中文字体按平台回退选择
-    matplotlib.rcParams['axes.unicode_minus'] = False  # 正常显示负号
+    _setup_matplotlib()
     if df.empty:
         messagebox.showinfo('无数据', '没有可统计的账单数据。')
         return
@@ -62,7 +86,8 @@ def show_single_month_pie(df, master):
     if months:
         cb.current(0)
         month_var.set(months[0])
-    btn = ttk.Button(sel_win, text='确定', command=lambda: show_pie(month_var.get(), df, master, sel_win))
+    btn = ttk.Button(sel_win, text='确定', style='Accent.TButton',
+                     command=lambda: show_pie(month_var.get(), df, master, sel_win))
     btn.pack(pady=(10, 0), ipadx=12, ipady=2, anchor='center')
 
 
@@ -84,26 +109,30 @@ def draw_pie(month, df, master, win=None):
     # 确保金额为数值且非空
     month_df['金额'] = pd.to_numeric(month_df['金额'], errors='coerce').fillna(0)
     fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+    fig.patch.set_facecolor('white')  # 图表背景与窗口协调（设计稿 4.3）：纯白底
+    for ax in axs:
+        ax.set_facecolor('white')
     # 支出分类
     expense = month_df[month_df['类型'] == '支出'].groupby('分类')['金额'].sum()
     if not expense.empty and expense.sum() > 0:
         try:
-            axs[0].pie(expense, labels=expense.index, autopct='%1.1f%%')
-            axs[0].set_title(f'{month} 支出分类')
+            # 分类饼图统一用低饱和暖系色板（设计稿 4.3），替换 matplotlib 默认彩色
+            axs[0].pie(expense, labels=expense.index, autopct='%1.1f%%', colors=CHART_PALETTE)
+            axs[0].set_title(f'{month} 支出分类', fontsize=14, loc='left', color=TEXT)
         except Exception as e:
-            axs[0].text(0.5, 0.5, f'绘图错误: {e}', ha='center', va='center')
+            axs[0].text(0.5, 0.5, f'绘图错误: {e}', ha='center', va='center', color=TEXT_MUTED)
     else:
-        axs[0].text(0.5, 0.5, '无支出数据', ha='center', va='center')
+        axs[0].text(0.5, 0.5, '无支出数据', ha='center', va='center', color=TEXT_MUTED)
     # 收入分类
     income = month_df[month_df['类型'] == '收入'].groupby('分类')['金额'].sum()
     if not income.empty and income.sum() > 0:
         try:
-            axs[1].pie(income, labels=income.index, autopct='%1.1f%%')
-            axs[1].set_title(f'{month} 收入分类')
+            axs[1].pie(income, labels=income.index, autopct='%1.1f%%', colors=CHART_PALETTE)
+            axs[1].set_title(f'{month} 收入分类', fontsize=14, loc='left', color=TEXT)
         except Exception as e:
-            axs[1].text(0.5, 0.5, f'绘图错误: {e}', ha='center', va='center')
+            axs[1].text(0.5, 0.5, f'绘图错误: {e}', ha='center', va='center', color=TEXT_MUTED)
     else:
-        axs[1].text(0.5, 0.5, '无收入数据', ha='center', va='center')
+        axs[1].text(0.5, 0.5, '无收入数据', ha='center', va='center', color=TEXT_MUTED)
     plt.tight_layout()
     win._pie_fig = fig  # 保存引用，供切换月份时关闭旧图、窗口销毁时释放
     canvas = FigureCanvasTkAgg(fig, master=win)
