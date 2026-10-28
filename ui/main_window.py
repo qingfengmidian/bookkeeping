@@ -4,6 +4,7 @@ from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog, Prev
 from ui.charts import show_monthly_chart, show_single_month_pie, show_pie
 from db.database import ensure_db, create_table, load_data, save_data
 from model.record_model import process_monthly, process_detail
+from ui.theme import pick_font_family, INCOME, EXPENSE, TOTAL_EXPENSE, ROW_STRIPE, TEXT_MUTED
 from utils.constants import DB_DEFAULT, CATEGORIES, TABLE_RECORDS_SCHEMA, TABLE_NAME, CJK_FONT_FALLBACK
 from utils.logger import get_logger
 import pandas as pd
@@ -20,11 +21,11 @@ class RecordBook:
     def __init__(self, master):
         self.master = master
         self.master.title('记账本')
-        self.master.geometry('850x600')
+        self.master.geometry('960x640')
         # 设置全局字体
         self.default_font = tkfont.nametofont('TkDefaultFont')
         self.default_font.configure(size=self.default_font['size'] + 2)
-        self.tree_font = tkfont.Font(family='微软雅黑', size=12)
+        self.tree_font = tkfont.Font(family=pick_font_family(), size=12)
         self.db_path = DB_DEFAULT
         self.conn = None
         self.dirty = False  # 数据变更标志
@@ -552,41 +553,41 @@ class RecordBook:
         messagebox.showinfo('打开成功', f'已打开数据库：{self.db_path}')
 
     def create_widgets(self):
-        # Top input frame
-        input_frame = ttk.LabelFrame(self.master, text='添加账单')
+        # 输入区：BG_SUBTLE 底平面面板，内部栅格统一 8px 间距（设计稿 4.1-1）
+        input_frame = ttk.Frame(self.master, style='Subtle.TFrame')
         input_frame.pack(fill='x', padx=10, pady=5)
 
-        ttk.Label(input_frame, text='日期:').grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(input_frame, text='日期:').grid(row=0, column=0, padx=8, pady=8)
         self.date_var = tk.StringVar(value=datetime.now().strftime('%Y-%m-%d'))
         self.date_entry = DateEntry(input_frame, textvariable=self.date_var, date_pattern='yyyy-mm-dd', width=12, font=self.default_font)
-        self.date_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.date_entry.grid(row=0, column=1, padx=8, pady=8)
         try:
             self.date_entry.bind('<Escape>', lambda e: self._on_de_escape(self.date_entry), add='+')
         except Exception:
             pass
 
-        ttk.Label(input_frame, text='类型:').grid(row=0, column=2, padx=5, pady=5)
+        ttk.Label(input_frame, text='类型:').grid(row=0, column=2, padx=8, pady=8)
         self.type_var = tk.StringVar(value='支出')
         self.type_combo = ttk.Combobox(input_frame, textvariable=self.type_var, values=['支出', '收入'], width=8, state='readonly')
-        self.type_combo.grid(row=0, column=3, padx=5, pady=5)
+        self.type_combo.grid(row=0, column=3, padx=8, pady=8)
 
-        ttk.Label(input_frame, text='分类:').grid(row=0, column=4, padx=5, pady=5)
+        ttk.Label(input_frame, text='分类:').grid(row=0, column=4, padx=8, pady=8)
         self.cat_var = tk.StringVar(value=CATEGORIES[0])
         self.cat_combo = ttk.Combobox(input_frame, textvariable=self.cat_var, values=CATEGORIES, width=10, state='readonly')
-        self.cat_combo.grid(row=0, column=5, padx=5, pady=5)
+        self.cat_combo.grid(row=0, column=5, padx=8, pady=8)
 
-        ttk.Label(input_frame, text='金额:').grid(row=0, column=6, padx=5, pady=5)
+        ttk.Label(input_frame, text='金额:').grid(row=0, column=6, padx=8, pady=8)
         self.amount_var = tk.StringVar()
         self.amount_entry = ttk.Entry(input_frame, textvariable=self.amount_var, width=10)
-        self.amount_entry.grid(row=0, column=7, padx=5, pady=5)
+        self.amount_entry.grid(row=0, column=7, padx=8, pady=8)
 
-        ttk.Label(input_frame, text='备注:').grid(row=0, column=8, padx=5, pady=5)
+        ttk.Label(input_frame, text='备注:').grid(row=0, column=8, padx=8, pady=8)
         self.note_var = tk.StringVar()
         self.note_entry = ttk.Entry(input_frame, textvariable=self.note_var, width=15)
-        self.note_entry.grid(row=0, column=9, padx=5, pady=5)
+        self.note_entry.grid(row=0, column=9, padx=8, pady=8)
 
-        self.add_btn = ttk.Button(input_frame, text='添加', command=self.add_record)
-        self.add_btn.grid(row=0, column=10, padx=5, pady=5)
+        self.add_btn = ttk.Button(input_frame, text='添加', style='Accent.TButton', command=self.add_record)
+        self.add_btn.grid(row=0, column=10, padx=8, pady=8)
 
         # 设置输入区所有控件字体
         for child in input_frame.winfo_children():
@@ -605,38 +606,56 @@ class RecordBook:
         self.tree.bind('<Double-1>', self.on_tree_double_click)  # 双击行编辑
         for col in columns:
             self.tree.heading(col, text=col, command=lambda _col=col: self.sort_by_column(_col))
-            self.tree.column(col, width=90, anchor='center')
+            # 金额列右对齐（设计稿 NUMERIC），其余列居中
+            anchor = 'e' if col == '金额' else 'center'
+            self.tree.column(col, width=90, anchor=anchor)
         self._sort_column = None  # 当前排序列
         self._sort_asc = True     # 当前排序方向
+        # 斑马行与收支语义色标签（设计稿 4.1-2）
+        self.tree.tag_configure('even', background=ROW_STRIPE)
+        self.tree.tag_configure('income', foreground=INCOME)
+        self.tree.tag_configure('expense', foreground=EXPENSE)
         self.tree.pack(side='left', fill='both', expand=True)
-        # 设置Treeview字体（表头和内容）
-        style = ttk.Style()
-        style.configure('Treeview', font=self.default_font)
-        style.configure('Treeview.Heading', font=self.default_font)
         scrollbar = ttk.Scrollbar(table_frame, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side='right', fill='y')
 
-        # Delete button below table
+        # 按钮区：删除类操作降为文字按钮，弱化误触（设计稿 4.1-3）
         btn_frame = ttk.Frame(self.master)
         btn_frame.pack(fill='x', padx=10, pady=(0,5))
-        self.delete_btn = ttk.Button(btn_frame, text='删除选中账单', command=self.delete_record)
-        self.delete_btn.pack(side='left', padx=0)
-        self.delete_all_btn = ttk.Button(btn_frame, text='删除全部', command=self.delete_all_records)
-        self.delete_all_btn.pack(side='left', padx=10)
+        self.delete_btn = ttk.Button(btn_frame, text='删除选中账单', style='DangerText.TButton', command=self.delete_record)
+        self.delete_btn.pack(side='left', padx=(0, 20))
+        self.delete_all_btn = ttk.Button(btn_frame, text='删除全部', style='MutedText.TButton', command=self.delete_all_records)
+        self.delete_all_btn.pack(side='left', padx=0)
 
-        # Bottom stats
-        stats_frame = ttk.LabelFrame(self.master, text='统计')
+        # 统计区：BG_SUBTLE 底栏，大数字 + CAPTION 说明（设计稿 4.1-4）
+        stats_frame = ttk.Frame(self.master, style='Subtle.TFrame')
         stats_frame.pack(fill='x', padx=10, pady=5)
 
-        self.stats_label = ttk.Label(stats_frame, text='')
-        self.stats_label.pack(side='left', padx=10)
-        
-        # 当前数据库路径显示
-        self.db_path_label = ttk.Label(stats_frame, text='', foreground='gray')
-        self.db_path_label.pack(side='right', padx=10)
+        # 左侧：总收入/总支出大数字（INCOME/EXPENSE 色）+ CAPTION 说明
+        family = pick_font_family()
+        income_frame = ttk.Frame(stats_frame, style='Subtle.TFrame')
+        income_frame.pack(side='left', padx=(12, 24), pady=6)
+        self.income_value_label = ttk.Label(income_frame, text='0.00', style='Subtle.TLabel',
+                                            font=(family, 14), foreground=INCOME)
+        self.income_value_label.pack(side='left')
+        ttk.Label(income_frame, text=' 总收入', style='Subtle.TLabel',
+                  font=(family, 11), foreground=TEXT_MUTED).pack(side='left')
+
+        expense_frame = ttk.Frame(stats_frame, style='Subtle.TFrame')
+        expense_frame.pack(side='left', padx=(0, 24), pady=6)
+        self.expense_value_label = ttk.Label(expense_frame, text='0.00', style='Subtle.TLabel',
+                                             font=(family, 14), foreground=TOTAL_EXPENSE)
+        self.expense_value_label.pack(side='left')
+        ttk.Label(expense_frame, text=' 总支出', style='Subtle.TLabel',
+                  font=(family, 11), foreground=TEXT_MUTED).pack(side='left')
+
+        # 右侧：当前数据库路径（10px TEXT_MUTED）
+        self.db_path_label = ttk.Label(stats_frame, text='', style='Subtle.TLabel',
+                                       font=(family, 10), foreground=TEXT_MUTED)
+        self.db_path_label.pack(side='right', padx=12)
         self.update_db_path_display()
-        
+
         # 已去除右下角显示图表按钮
 
 
@@ -685,8 +704,12 @@ class RecordBook:
             self.tree.delete(row)
         # 用于筛选和排序的数据
         df = filtered_df if filtered_df is not None else self.data
-        for idx, row in df.iterrows():
-            self.tree.insert('', 'end', iid=str(idx), values=(row['日期'], row['类型'], row['分类'], row['金额'], row['备注']))
+        for i, (idx, row) in enumerate(df.iterrows()):
+            # 斑马行 even/odd + 收支语义色 income/expense（类型列文字着色）
+            stripe_tag = 'even' if i % 2 == 0 else 'odd'
+            type_tag = 'income' if row['类型'] == '收入' else 'expense'
+            self.tree.insert('', 'end', iid=str(idx), values=(row['日期'], row['类型'], row['分类'], row['金额'], row['备注']),
+                             tags=(stripe_tag, type_tag))
         self.update_stats()
 
     def update_stats(self):
@@ -695,7 +718,8 @@ class RecordBook:
         df['金额'] = pd.to_numeric(df['金额'], errors='coerce').fillna(0)
         income = df[df['类型'] == '收入']['金额'].sum()
         expense = df[df['类型'] == '支出']['金额'].sum()
-        self.stats_label.config(text=f'总收入: {income:.2f} 元    总支出: {expense:.2f} 元')
+        self.income_value_label.config(text=f'{income:.2f}')
+        self.expense_value_label.config(text=f'{expense:.2f}')
 
     def update_db_path_display(self):
         """更新当前数据库路径显示"""

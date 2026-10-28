@@ -4,7 +4,6 @@
 提供应用级别的日志配置和获取日志记录器功能。
 """
 import logging
-from pathlib import Path
 
 # 日志格式
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -13,8 +12,10 @@ DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 # 默认日志级别
 DEFAULT_LEVEL = logging.INFO
 
-# 日志文件路径（基于项目根目录定位，避免依赖运行时工作目录）
-LOG_DIR = Path(__file__).resolve().parent.parent / 'logs'
+# 日志文件路径（基于项目根目录定位；打包环境下与数据库一致，锚定 exe 所在目录）
+from utils.constants import PROJECT_ROOT
+
+LOG_DIR = PROJECT_ROOT / 'logs'
 LOG_FILE = LOG_DIR / 'bookkeeping.log'
 
 

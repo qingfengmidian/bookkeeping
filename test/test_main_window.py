@@ -44,15 +44,19 @@ class TestRecordBookCoreLogic:
                                                     with patch.object(RecordBook, 'refresh_table'):
                                                         rb = RecordBook(mock_master)
                                                         rb.data = sample_data
-                                                        rb.stats_label = MagicMock()
-                                                        
+                                                        # 阶段1-2 样式改造：统计区拆分为收入/支出两个大数字标签
+                                                        rb.income_value_label = MagicMock()
+                                                        rb.expense_value_label = MagicMock()
+
                                                         rb.update_stats()
 
-                                                        # 验证统计标签被调用一次，且文本包含正确的总收入/总支出
-                                                        rb.stats_label.config.assert_called_once()
-                                                        text = rb.stats_label.config.call_args.kwargs.get('text', '')
-                                                        assert '1000' in text  # 总收入 1000 元
-                                                        assert '80' in text    # 总支出 80 元（50 + 30）
+                                                        # 验证两个统计标签各被调用一次，且数值正确
+                                                        rb.income_value_label.config.assert_called_once()
+                                                        rb.expense_value_label.config.assert_called_once()
+                                                        income_text = rb.income_value_label.config.call_args.kwargs.get('text', '')
+                                                        expense_text = rb.expense_value_label.config.call_args.kwargs.get('text', '')
+                                                        assert '1000' in income_text  # 总收入 1000 元
+                                                        assert '80' in expense_text   # 总支出 80 元（50 + 30）
 
 
 class TestRecordBookDataOperations:

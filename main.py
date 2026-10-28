@@ -17,6 +17,7 @@
 
 import tkinter as tk
 from ui.main_window import RecordBook
+from ui.theme import apply_theme
 from utils.logger import setup_logging, get_logger
 
 # 初始化日志系统
@@ -29,7 +30,16 @@ def main():
     logger.info('记账本应用启动')
     try:
         root = tk.Tk()
+        apply_theme(root)
+        root.minsize(960, 640)
         app = RecordBook(root)
+        # 启动时按屏幕宽高居中窗口
+        root.update_idletasks()
+        win_w = root.winfo_width()
+        win_h = root.winfo_height()
+        x = (root.winfo_screenwidth() - win_w) // 2
+        y = (root.winfo_screenheight() - win_h) // 2
+        root.geometry(f'+{x}+{y}')
         logger.info('主窗口初始化完成')
         root.mainloop()
     except Exception as e:
