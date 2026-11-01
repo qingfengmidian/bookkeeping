@@ -1,6 +1,5 @@
 # 记账本 bookkeeping（跨平台桌面版）
 
-[![Gitee](https://img.shields.io/badge/Gitee-qingfengmidian%2Fbookkeeping-red)](https://gitee.com/qingfengmidian/bookkeeping)
 [![License](https://img.shields.io/badge/License-ISC-blue)](LICENSE)
 
 一个简洁高效的跨平台桌面记账本程序（Windows / macOS / Linux），支持收入/支出账单管理、支付宝/微信账单导入、可视化统计与数据导出。界面遵循极简主义设计，适合个人日常财务记录与分析。
@@ -9,7 +8,7 @@
 
 ## 下载即用（Windows）
 
-前往 [Gitee Releases](https://gitee.com/qingfengmidian/bookkeeping/releases) 下载 `bookkeeping.exe`——单文件、免安装、免 Python 环境，双击即用。数据保存在 exe 同目录的 `database/` 文件夹中，可随文件夹整体移动。
+前往本仓库的 Releases 页面下载 `bookkeeping.exe`——单文件、免安装、免 Python 环境，双击即用。数据保存在 exe 同目录的 `database/` 文件夹中，可随文件夹整体移动。
 
 > 首次运行如提示"未知发布者"，选择"仍要运行"即可（未购买代码签名证书）。
 
@@ -40,6 +39,12 @@
 - 状态栏显示当前数据库路径
 - 应用日志记录（保存于 `logs/` 目录）
 
+### 界面与个性化
+- 中/英文界面一键切换（选择持久保存）
+- 设置菜单：菜单字号、界面字号自由调节（持久保存）
+- 窗口自适应缩放，小窗口下表格支持横向滚动，内容不再被裁剪
+- 对话框按内容自适应大小，按钮始终可见
+
 ## 项目结构
 
 ```text
@@ -56,9 +61,11 @@ bookkeeping/
 │    └─ charts.py         # 图表绘制与嵌入
 ├─ utils/
 │    ├─ constants.py      # 常量（分类、路径、字体栈等）
+│    ├─ i18n.py           # 界面语言（中/英）翻译与持久化
+│    ├─ settings.py       # 应用设置（字号等）读写与持久化
 │    └─ logger.py         # 日志配置
 ├─ examples/              # 匿名化示例账单（体验导入功能用）
-├─ test/                  # 单元测试（55 个用例）
+├─ test/                  # 单元测试（78 个用例）
 ├─ requirements.txt       # 依赖清单
 ├─ LICENSE                # ISC License
 └─ docs/                  # 文档
@@ -100,15 +107,16 @@ python3 -m venv venv
 ### 执行测试
 
 ```bash
-pytest        # 55 个测试用例，全部无界面（headless）运行
+pytest        # 78 个测试用例，全部无界面（headless）运行
 ```
 
 ### 打包发布
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name bookkeeping main.py
-# 产物：dist/bookkeeping.exe（约 62MB 单文件）
+pyinstaller bookkeeping.spec
+# 产物：dist/bookkeeping/ 目录（onedir 形式，启动速度快；目录内 bookkeeping 为可执行文件）
+# 如需 Windows 单文件版，可改用：pyinstaller --onefile --windowed --name bookkeeping main.py
 ```
 
 macOS / Linux 平台需在对应系统上执行相同命令，产出对应平台的可执行文件。
@@ -137,8 +145,10 @@ Excel 文件（.xlsx），自动跳过前 16 行说明文字，自动去除金�
 - **安全性**：全部数据库写入使用参数化查询，防止 SQL 注入
 - **性能**：executemany 批量插入，自动创建索引
 - **跨平台**：Windows / macOS / Linux，中文字体按平台回退
-- **可测试性**：55 个单元测试用例，覆盖数据层、导入链路、核心交互
-- **易部署**：PyInstaller 单文件打包，数据与日志锚定可执行文件目录
+- **可测试性**：78 个单元测试用例，覆盖数据层、导入链路、核心交互
+- **国际化**：界面层中/英双语切换，数据层保持中文字段，存量数据与导入流程零影响
+- **启动性能**：matplotlib 延迟加载 + onedir 打包，冷启动时间大幅缩短
+- **易部署**：PyInstaller 打包，数据与日志锚定可执行文件目录
 
 ## 数据存储
 

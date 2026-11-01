@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 from utils.constants import CATEGORIES
 from ui.theme import BG, TEXT_MUTED, pick_font_family
+from utils.i18n import _, _t, to_zh
 import pandas as pd
 
 
@@ -12,11 +13,21 @@ def _use_caption_labels(widget):
     style.configure('Caption.TLabel', background=BG, foreground=TEXT_MUTED,
                     font=(pick_font_family(), 11))
 
+def _fit_to_content(dialog, min_width=420):
+    """按实际内容自适应窗口尺寸，避免固定高度裁剪掉底部按钮（设计稿 4.2 宽度约束保留）"""
+    update = getattr(dialog, 'update_idletasks', None)
+    if update is None:
+        return  # 测试环境下 dialog 为 mock，无真实窗口
+    update()
+    w = max(min_width, dialog.winfo_reqwidth())
+    h = dialog.winfo_reqheight()
+    dialog.geometry(f'{w}x{h}')
+    dialog.minsize(min_width, h)
+
 class FilterDialog(tk.Toplevel):
     def __init__(self, master, filter_dict, font):
         super().__init__(master)
-        self.title('筛选账单')
-        self.geometry('420x400')  # 普通对话框统一 420px 宽（设计稿 4.2）
+        self.title(_('筛选账单'))
         self.result = None
         self.resizable(False, False)
         self.transient(master)
@@ -37,7 +48,7 @@ class FilterDialog(tk.Toplevel):
         self.vars = {}
         # 字段纵向排列：label 在上、控件在下，控件间距统一 8px（设计稿 4.2）
         # 起始日期
-        ttk.Label(container, text='起始日期', style='Caption.TLabel').grid(row=0, column=0, sticky='w', pady=(0, 2))
+        ttk.Label(container, text=_('起始日期'), style='Caption.TLabel').grid(row=0, column=0, sticky='w', pady=(0, 2))
         start_val = filter_dict.get('start', '')
         self.start_var = tk.StringVar(value=start_val or now.strftime('%Y-%m-%d'))
         self.start_entry = DateEntry(container, textvariable=self.start_var, date_pattern='yyyy-mm-dd', width=12, font=self.font)
@@ -47,7 +58,7 @@ class FilterDialog(tk.Toplevel):
         except Exception:
             pass
         # 结束日期
-        ttk.Label(container, text='结束日期', style='Caption.TLabel').grid(row=2, column=0, sticky='w', pady=(0, 2))
+        ttk.Label(container, text=_('结束日期'), style='Caption.TLabel').grid(row=2, column=0, sticky='w', pady=(0, 2))
         end_val = filter_dict.get('end', '')
         self.end_var = tk.StringVar(value=end_val or now.strftime('%Y-%m-%d'))
         self.end_entry = DateEntry(container, textvariable=self.end_var, date_pattern='yyyy-mm-dd', width=12, font=self.font)
@@ -58,29 +69,30 @@ class FilterDialog(tk.Toplevel):
             pass
         # 其余筛选项
         # 金额区间
-        ttk.Label(container, text='最小金额', style='Caption.TLabel').grid(row=4, column=0, sticky='w', pady=(0, 2))
+        ttk.Label(container, text=_('最小金额'), style='Caption.TLabel').grid(row=4, column=0, sticky='w', pady=(0, 2))
         min_amt = filter_dict.get('min_amt', '')
         self.min_amt_var = tk.StringVar(value=min_amt)
         ttk.Entry(container, textvariable=self.min_amt_var, font=self.font, width=8).grid(row=5, column=0, sticky='w', pady=(0, 8))
-        ttk.Label(container, text='最大金额', style='Caption.TLabel').grid(row=6, column=0, sticky='w', pady=(0, 2))
+        ttk.Label(container, text=_('最大金额'), style='Caption.TLabel').grid(row=6, column=0, sticky='w', pady=(0, 2))
         max_amt = filter_dict.get('max_amt', '')
         self.max_amt_var = tk.StringVar(value=max_amt)
         ttk.Entry(container, textvariable=self.max_amt_var, font=self.font, width=8).grid(row=7, column=0, sticky='w', pady=(0, 8))
-        # 类型
-        ttk.Label(container, text='类型', style='Caption.TLabel').grid(row=8, column=0, sticky='w', pady=(0, 2))
+        # 类型（显示值随语言切换，提交时通过 to_zh 映射回内部中文值）
+        ttk.Label(container, text=_('类型'), style='Caption.TLabel').grid(row=8, column=0, sticky='w', pady=(0, 2))
         type_val = filter_dict.get('type', '全部')
-        self.type_var = tk.StringVar(value=type_val or '全部')
-        ttk.Combobox(container, textvariable=self.type_var, values=['全部', '支出', '收入'], state='readonly', font=self.font, width=6).grid(row=9, column=0, sticky='w', pady=(0, 8))
+        self.type_var = tk.StringVar(value=_(type_val or '全部'))
+        ttk.Combobox(container, textvariable=self.type_var, values=[_('全部'), _('支出'), _('收入')], state='readonly', font=self.font, width=6).grid(row=9, column=0, sticky='w', pady=(0, 8))
         # 分类
-        ttk.Label(container, text='分类', style='Caption.TLabel').grid(row=10, column=0, sticky='w', pady=(0, 2))
+        ttk.Label(container, text=_('分类'), style='Caption.TLabel').grid(row=10, column=0, sticky='w', pady=(0, 2))
         cat_val = filter_dict.get('cat', '全部')
-        self.cat_var = tk.StringVar(value=cat_val or '全部')
-        ttk.Combobox(container, textvariable=self.cat_var, values=['全部'] + CATEGORIES, state='readonly', font=self.font, width=6).grid(row=11, column=0, sticky='w', pady=(0, 8))
+        self.cat_var = tk.StringVar(value=_(cat_val or '全部'))
+        ttk.Combobox(container, textvariable=self.cat_var, values=[_('全部')] + [_(c) for c in CATEGORIES], state='readonly', font=self.font, width=6).grid(row=11, column=0, sticky='w', pady=(0, 8))
         # 底部按钮组：右对齐，主操作「应用筛选」在右（设计稿 4.2）
         btn_frame = ttk.Frame(container)
         btn_frame.grid(row=12, column=0, sticky='e', pady=(8, 0))
-        ttk.Button(btn_frame, text='清除筛选', command=self.on_clear).pack(side='left', padx=(0, 8))
-        ttk.Button(btn_frame, text='应用筛选', style='Accent.TButton', command=self.on_ok).pack(side='right')
+        ttk.Button(btn_frame, text=_('清除筛选'), style='Accent.TButton', command=self.on_clear).pack(side='left', padx=(0, 8))
+        ttk.Button(btn_frame, text=_('应用筛选'), style='Accent.TButton', command=self.on_ok).pack(side='right')
+        _fit_to_content(self)
 
     def on_ok(self):
         # 读取 DateEntry 的日期字符串（yyyy-mm-dd）
@@ -91,8 +103,9 @@ class FilterDialog(tk.Toplevel):
             'end': end,
             'min_amt': self.min_amt_var.get(),
             'max_amt': self.max_amt_var.get(),
-            'type': self.type_var.get(),
-            'cat': self.cat_var.get(),
+            # 显示值（可能是英文）映射回内部中文值
+            'type': to_zh(self.type_var.get()),
+            'cat': to_zh(self.cat_var.get()),
         }
         self.result = result
         self.destroy()
@@ -136,8 +149,7 @@ class FilterDialog(tk.Toplevel):
 class EditRecordDialog(tk.Toplevel):
     def __init__(self, master, record, font):
         super().__init__(master)
-        self.title('编辑账单')
-        self.geometry('420x380')  # 普通对话框统一 420px 宽（设计稿 4.2）
+        self.title(_('编辑账单'))
         self.result = None
         self.resizable(False, False)
         self.transient(master)
@@ -153,7 +165,7 @@ class EditRecordDialog(tk.Toplevel):
         self.vars = {}
         # 字段纵向排列：label 在上、控件在下，间距统一 8px
         for i, field in enumerate(fields):
-            ttk.Label(container, text=field, style='Caption.TLabel').grid(row=i*2, column=0, sticky='w', pady=(0, 2))
+            ttk.Label(container, text=_(field), style='Caption.TLabel').grid(row=i*2, column=0, sticky='w', pady=(0, 2))
             var = tk.StringVar(value=str(record.get(field, '')))
             if field == '类型':
                 cb = ttk.Combobox(container, textvariable=var, values=['收入', '支出'], state='readonly', font=self.font)
@@ -166,13 +178,14 @@ class EditRecordDialog(tk.Toplevel):
         # 底部按钮组：右对齐，主操作「保存」在右（设计稿 4.2）
         btn_frame = ttk.Frame(container)
         btn_frame.grid(row=len(fields)*2, column=0, sticky='e', pady=(8, 0))
-        ttk.Button(btn_frame, text='保存', style='Accent.TButton', command=self.on_ok).pack(side='right')
+        ttk.Button(btn_frame, text=_('保存'), style='Accent.TButton', command=self.on_ok).pack(side='right')
+        _fit_to_content(self)
     def on_ok(self):
         # 校验金额为数字
         try:
             float(self.vars['金额'].get())
         except ValueError:
-            messagebox.showerror('输入错误', '金额必须为数字')
+            messagebox.showerror(_('输入错误'), _('金额必须为数字'))
             return
         self.result = {field: self.vars[field].get() for field in self.vars}
         self.destroy()
@@ -180,8 +193,7 @@ class EditRecordDialog(tk.Toplevel):
 class ImportMappingDialog(tk.Toplevel):
     def __init__(self, master, columns, default_map, font):
         super().__init__(master)
-        self.title('选择导入列对应关系')
-        self.geometry('420x380')  # 普通对话框统一 420px 宽（设计稿 4.2）
+        self.title(_('选择导入列对应关系'))
         self.result = None
         self.resizable(False, False)
         self.transient(master)
@@ -197,7 +209,7 @@ class ImportMappingDialog(tk.Toplevel):
         fields = ['日期', '类型', '分类', '金额', '备注']
         # 字段纵向排列：label 在上、控件在下，间距统一 8px
         for i, field in enumerate(fields):
-            ttk.Label(container, text=field, style='Caption.TLabel').grid(row=i*2, column=0, sticky='w', pady=(0, 2))
+            ttk.Label(container, text=_(field), style='Caption.TLabel').grid(row=i*2, column=0, sticky='w', pady=(0, 2))
             var = tk.StringVar(value=default_map.get(field, columns[0] if columns else ''))
             cb = ttk.Combobox(container, textvariable=var, values=columns, state='readonly', font=self.font)
             cb.grid(row=i*2+1, column=0, sticky='ew', pady=(0, 8))
@@ -205,7 +217,8 @@ class ImportMappingDialog(tk.Toplevel):
         # 底部按钮组：右对齐，主操作「确定」在右（设计稿 4.2）
         btn_frame = ttk.Frame(container)
         btn_frame.grid(row=len(fields)*2, column=0, sticky='e', pady=(8, 0))
-        ttk.Button(btn_frame, text='确定', style='Accent.TButton', command=self.on_ok).pack(side='right')
+        ttk.Button(btn_frame, text=_('确定'), style='Accent.TButton', command=self.on_ok).pack(side='right')
+        _fit_to_content(self)
     def on_ok(self):
         self.result = {field: var.get() for field, var in self.vars.items()}
         self.destroy()
@@ -222,7 +235,7 @@ class PreviewDialog(tk.Toplevel):
             font: 字体设置
         """
         super().__init__(master)
-        self.title('导入数据预览')
+        self.title(_('导入数据预览'))
         self.geometry('720x500')  # 预览对话框 720px 宽（设计稿 4.2）
         self.result = False  # 默认不确认导入
         self.resizable(True, True)  # 允许调整大小
@@ -237,7 +250,7 @@ class PreviewDialog(tk.Toplevel):
         self._sort_state = {'col': None, 'asc': True}
 
         # 创建预览标签：说明文字用 CAPTION 层级，外边框留白统一 16px
-        ttk.Label(self, text='即将导入的数据预览（显示前10行）：', style='Caption.TLabel').pack(fill='x', padx=16, pady=(16, 4))
+        ttk.Label(self, text=_('即将导入的数据预览（显示前10行）：'), style='Caption.TLabel').pack(fill='x', padx=16, pady=(16, 4))
 
         # 创建表格显示预览数据
         frame = ttk.Frame(self)
@@ -249,7 +262,7 @@ class PreviewDialog(tk.Toplevel):
         
         # 设置列标题和宽度，并绑定点击排序
         for col in self.columns:
-            self.tree.heading(col, text=col, command=lambda c=col: self._on_heading_click(c))
+            self.tree.heading(col, text=_(col), command=lambda c=col: self._on_heading_click(c))
             self.tree.column(col, width=100, anchor='center')
         
         # 添加滚动条
@@ -271,7 +284,7 @@ class PreviewDialog(tk.Toplevel):
         
         # 显示总行数信息
         total_rows = len(data)
-        ttk.Label(self, text=f'总记录数: {total_rows}', style='Caption.TLabel').pack(fill='x', padx=16, pady=(4, 0))
+        ttk.Label(self, text=_t('总记录数: {n}').format(n=total_rows), style='Caption.TLabel').pack(fill='x', padx=16, pady=(4, 0))
 
         # 绑定双击编辑事件
         self.tree.bind('<Double-1>', self._on_tree_double_click)
@@ -281,8 +294,8 @@ class PreviewDialog(tk.Toplevel):
         btn_frame.pack(fill='x', padx=16, pady=(8, 16))
 
         # 确认和取消按钮
-        ttk.Button(btn_frame, text='确认导入', style='Accent.TButton', command=self.on_confirm).pack(side='right')
-        ttk.Button(btn_frame, text='取消', command=self.on_cancel).pack(side='right', padx=(0, 8))
+        ttk.Button(btn_frame, text=_('确认导入'), style='Accent.TButton', command=self.on_confirm).pack(side='right')
+        ttk.Button(btn_frame, text=_('取消'), command=self.on_cancel).pack(side='right', padx=(0, 8))
     
     def on_confirm(self):
         self.result = True

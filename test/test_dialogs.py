@@ -176,6 +176,29 @@ class TestFilterDialog:
         # 验证结果为清除标记
         assert dialog.result == '__clear__'
 
+    def test_filter_dialog_buttons_same_style(self, mock_dialogs):
+        """测试筛选对话框「清除筛选」与「应用筛选」按钮样式一致（均为 Accent.TButton）"""
+        dialogs, mock_tk, mock_ttk, mock_msg, mock_tkcalendar = mock_dialogs
+
+        mock_master = MagicMock()
+        mock_font = MagicMock()
+        mock_tkcalendar.DateEntry = MagicMock()
+
+        dialogs.FilterDialog(mock_master, {}, mock_font)
+
+        # dialogs 内的 ttk 引用以实际导入为准（mock 环境下是 mock_tk.ttk）
+        dialog_ttk = dialogs.ttk
+        button_texts = []
+        for call in dialog_ttk.Button.call_args_list:
+            args, kwargs = call
+            text = args[1] if len(args) > 1 else kwargs.get('text')
+            button_texts.append(text)
+            # 所有按钮必须使用 Accent.TButton 样式
+            assert kwargs.get('style') == 'Accent.TButton', f'按钮 {text} 样式不一致: {kwargs}'
+
+        assert '清除筛选' in button_texts
+        assert '应用筛选' in button_texts
+
 
 class TestEditRecordDialog:
     """测试编辑对话框"""

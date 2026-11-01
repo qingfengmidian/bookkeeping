@@ -31,7 +31,7 @@ def main():
     try:
         root = tk.Tk()
         apply_theme(root)
-        root.minsize(960, 640)
+        root.minsize(720, 480)
         app = RecordBook(root)
         # 启动时按屏幕宽高居中窗口
         root.update_idletasks()
