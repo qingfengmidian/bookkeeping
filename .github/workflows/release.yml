@@ -12,6 +12,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-python@v5
         with:
@@ -45,7 +48,7 @@ jobs:
           $rel = $releases | Where-Object { $_.tag_name -eq $tag }
           if (-not $rel) {
             Write-Host "Release $tag not found on Gitee, creating..."
-            $body = @{ access_token = $env:GITEE_TOKEN; tag_name = $tag; target_commitish = "master"; name = $tag }
+            $body = @{ access_token = $env:GITEE_TOKEN; tag_name = $tag; target_commitish = "master"; name = $tag; body = "Release $tag" }
             $rel = Invoke-RestMethod -Method Post -Uri "https://gitee.com/api/v5/repos/qingfengmidian/bookkeeping/releases" -Body $body
           }
           curl.exe -s -X POST "https://gitee.com/api/v5/repos/qingfengmidian/bookkeeping/releases/$($rel.id)/attach_files" -F "access_token=$env:GITEE_TOKEN" -F "file=@dist/bookkeeping.exe"
