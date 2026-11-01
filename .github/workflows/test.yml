@@ -12,6 +12,14 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
         python-version: ['3.9', '3.12']
+        exclude:
+          # ubuntu-latest（26.04）的 setup-python 不再提供已 EOL 的 Python 3.9
+          - os: ubuntu-latest
+            python-version: '3.9'
+        include:
+          # Python 3.9 在 ubuntu-24.04 运行器上测试
+          - os: ubuntu-24.04
+            python-version: '3.9'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
