@@ -29,6 +29,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" dist/bookkeeping.exe --clobber
 
+      - name: Upload exe to Gitee release (tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          $release = Invoke-RestMethod -Uri "https://gitee.com/api/v5/repos/qingfengmidian/bookkeeping/releases" -Body @{ access_token = $env:GITEE_TOKEN }
+          $rel = $release | Where-Object { $_.tag_name -eq "${{ github.ref_name }}" }
+          if (-not $rel) { throw "Gitee release ${{ github.ref_name }} not found" }
+          curl.exe -s -X POST "https://gitee.com/api/v5/repos/qingfengmidian/bookkeeping/releases/$($rel.id)/attach_files" -F "access_token=$env:GITEE_TOKEN" -F "file=@dist/bookkeeping.exe"
+
       - name: Upload exe artifact (manual run)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v4
