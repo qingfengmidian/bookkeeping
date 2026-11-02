@@ -6,13 +6,29 @@
 
 ![主界面](docs/screenshot.png)
 
-## 下载即用（Windows）
+## 下载即用
 
-前往本仓库的 Releases 页面下载 `bookkeeping.exe`——单文件、免安装、免 Python 环境，双击即用。数据保存在 exe 同目录的 `database/` 文件夹中，可随文件夹整体移动。
+前往本仓库的 Releases 页面下载对应平台的构建产物。
+
+### Windows
+
+下载 `bookkeeping.exe`——单文件、免安装、免 Python 环境，双击即用。数据保存在 exe 同目录的 `database/` 文件夹中，可随文件夹整体移动。
 
 > 首次运行如提示"未知发布者"，选择"仍要运行"即可（未购买代码签名证书）。
 
-其他平台可[从源码运行](#从源码运行)。
+### Linux
+
+下载 `bookkeeping-linux-x86_64-<版本>.tar.xz`，解压后运行其中的 `bookkeeping` 可执行文件：
+
+```bash
+tar -xJf bookkeeping-linux-x86_64-v0.0.3.tar.xz
+cd bookkeeping
+./bookkeeping
+```
+
+数据保存在启动目录的 `database/` 文件夹中，建议固定在一个目录下启动。同目录的 `.sha256` 文件可用于校验下载完整性。
+
+其他平台或需要最新代码可[从源码运行](#从源码运行)。
 
 ## 功能简介
 
