@@ -363,3 +363,60 @@ class PreviewDialog(tk.Toplevel):
                         pass
                 self._refresh_tree()
 
+
+
+class PasswordDialog(tk.Toplevel):
+    """密码输入对话框：可选二次确认（设置/修改新密码时使用），掩码显示"""
+
+    def __init__(self, master, title, prompt, confirm_label=None, font=None):
+        super().__init__(master)
+        self.title(title)
+        self.password = None
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+        self.font = font
+
+        _use_caption_labels(self)
+        container = ttk.Frame(self, padding=16)
+        container.pack(fill='both', expand=True)
+
+        ttk.Label(container, text=prompt, style='Caption.TLabel').grid(row=0, column=0, sticky='w', pady=(0, 2))
+        self.pwd_var = tk.StringVar()
+        pwd_entry = ttk.Entry(container, textvariable=self.pwd_var, show='•', font=self.font, width=24)
+        pwd_entry.grid(row=1, column=0, sticky='w', pady=(0, 10))
+        pwd_entry.bind('<Return>', lambda e: self._focus_confirm_or_ok())
+
+        self.confirm_var = None
+        if confirm_label:
+            ttk.Label(container, text=confirm_label, style='Caption.TLabel').grid(row=2, column=0, sticky='w', pady=(0, 2))
+            self.confirm_var = tk.StringVar()
+            confirm_entry = ttk.Entry(container, textvariable=self.confirm_var, show='•', font=self.font, width=24)
+            confirm_entry.grid(row=3, column=0, sticky='w', pady=(0, 10))
+            confirm_entry.bind('<Return>', lambda e: self.on_ok())
+
+        btn_frame = ttk.Frame(container)
+        btn_frame.grid(row=4, column=0, sticky='e', pady=(4, 0))
+        ttk.Button(btn_frame, text=_('取消'), command=self.on_cancel).pack(side='left', padx=(0, 8))
+        ttk.Button(btn_frame, text=_('确定'), style='Accent.TButton', command=self.on_ok).pack(side='right')
+
+        _fit_to_content(self, min_width=320)
+        pwd_entry.focus_set()
+
+    def _focus_confirm_or_ok(self):
+        return self.on_ok()
+
+    def on_ok(self):
+        pwd = self.pwd_var.get()
+        if not pwd:
+            messagebox.showwarning(_('输入错误'), _('请输入密码'), parent=self)
+            return
+        if self.confirm_var is not None and pwd != self.confirm_var.get():
+            messagebox.showerror(_('输入错误'), _('两次输入的密码不一致'), parent=self)
+            return
+        self.password = pwd
+        self.destroy()
+
+    def on_cancel(self):
+        self.password = None
+        self.destroy()

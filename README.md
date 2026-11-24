@@ -21,7 +21,7 @@
 下载 `bookkeeping-linux-x86_64-<版本>.tar.xz`，解压后运行其中的 `bookkeeping` 可执行文件：
 
 ```bash
-tar -xJf bookkeeping-linux-x86_64-v0.0.3.tar.xz
+tar -xJf bookkeeping-linux-x86_64-v0.1.0.tar.xz
 cd bookkeeping
 ./bookkeeping
 ```
@@ -52,6 +52,7 @@ cd bookkeeping
 ### 系统管理
 - 多数据库文件管理（新建/打开/切换）
 - 数据另存为、一键导出 CSV
+- 数据库加密：AES-256-GCM 整文件加密，支持加密/解密/修改密码，每本账独立密码
 - 状态栏显示当前数据库路径
 - 应用日志记录（保存于 `logs/` 目录）
 
@@ -77,11 +78,12 @@ bookkeeping/
 │    └─ charts.py         # 图表绘制与嵌入
 ├─ utils/
 │    ├─ constants.py      # 常量（分类、路径、字体栈等）
+│    ├─ crypto.py         # 账本文件加密（AES-256-GCM + PBKDF2，utils/crypto.py）
 │    ├─ i18n.py           # 界面语言（中/英）翻译与持久化
 │    ├─ settings.py       # 应用设置（字号等）读写与持久化
 │    └─ logger.py         # 日志配置
 ├─ examples/              # 匿名化示例账单（体验导入功能用）
-├─ test/                  # 单元测试（78 个用例）
+├─ test/                  # 单元测试（90 个用例）
 ├─ requirements.txt       # 依赖清单
 ├─ LICENSE                # ISC License
 └─ docs/                  # 文档
@@ -123,7 +125,7 @@ python3 -m venv venv
 ### 执行测试
 
 ```bash
-pytest        # 78 个测试用例，全部无界面（headless）运行
+pytest        # 90 个测试用例，全部无界面（headless）运行
 ```
 
 ### 打包发布
@@ -161,7 +163,7 @@ Excel 文件（.xlsx），自动跳过前 16 行说明文字，自动去除金�
 - **安全性**：全部数据库写入使用参数化查询，防止 SQL 注入
 - **性能**：executemany 批量插入，自动创建索引
 - **跨平台**：Windows / macOS / Linux，中文字体按平台回退
-- **可测试性**：78 个单元测试用例，覆盖数据层、导入链路、核心交互
+- **可测试性**：90 个单元测试用例，覆盖数据层、导入链路、核心交互
 - **国际化**：界面层中/英双语切换，数据层保持中文字段，存量数据与导入流程零影响
 - **启动性能**：matplotlib 延迟加载 + onedir 打包，冷启动时间大幅缩短
 - **易部署**：PyInstaller 打包，数据与日志锚定可执行文件目录

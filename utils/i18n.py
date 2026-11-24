@@ -156,6 +156,44 @@ EN = {
     # 数据列显示名（内部数据仍使用中文字段名）
     '日期': 'Date',
     '备注': 'Note',
+    # 数据库加密
+    '输入密码': 'Enter Password',
+    '设置密码': 'Set Password',
+    '修改密码': 'Change Password',
+    '确认密码：': 'Confirm Password:',
+    '再次输入密码：': 'Re-enter Password:',
+    '再次输入新密码：': 'Re-enter New Password:',
+    '请输入新密码：': 'Enter a new password:',
+    '请输入原密码：': 'Enter current password:',
+    '请输入密码：': 'Enter a password:',
+    '请输入密码验证身份：': 'Enter password to verify:',
+    '请输入密码': 'Please enter a password',
+    '两次输入的密码不一致': 'Passwords do not match',
+    '密码错误': 'Wrong Password',
+    '密码错误，解密已取消。': 'Wrong password. Decryption cancelled.',
+    '密码错误，修改密码已取消。': 'Wrong password. Password change cancelled.',
+    '密码错误次数过多，已取消打开。': 'Too many wrong attempts. Opening cancelled.',
+    '是否为该账本设置密码加密？': 'Encrypt this ledger with a password?',
+    '加密当前账本': 'Encrypt Current Ledger',
+    '解密当前账本': 'Decrypt Current Ledger',
+    '弱密码提示': 'Weak Password',
+    '密码少于 6 位，安全性较低，仍要继续吗？': 'Password is shorter than 6 characters. Continue anyway?',
+    '确认加密': 'Confirm Encryption',
+    '加密后打开此账本需要输入密码。\n忘记密码将无法恢复数据，请牢记密码！\n\n确定继续吗？': 'Opening this ledger will require a password.\nForgotten passwords CANNOT be recovered!\n\nContinue?',
+    '确认解密': 'Confirm Decryption',
+    '确定要解密当前账本吗？\n解密后任何人都可以直接查看账本数据。': 'Decrypt this ledger?\nAnyone will be able to read the data afterwards.',
+    '加密成功': 'Encryption Successful',
+    '加密成功！今后打开此账本需要输入密码，请牢记密码。': 'Encrypted! A password is required to open this ledger. Remember it!',
+    '解密成功': 'Decryption Successful',
+    '解密成功！此账本已恢复为未加密状态。': 'Decrypted! This ledger is no longer encrypted.',
+    '密码修改成功': 'Password Changed',
+    '密码修改成功！今后打开此账本需要使用新密码。': 'Password changed! Use the new password to open this ledger.',
+    '解密失败': 'Decryption Failed',
+    '修改失败': 'Change Failed',
+    '新建失败': 'Create Failed',
+    '文件损坏': 'File Corrupted',
+    '文件已损坏或不是有效的加密账本。': 'The file is corrupted or is not a valid encrypted ledger.',
+    '未提供密码，无法打开加密账本': 'No password provided; cannot open the encrypted ledger.',
 }
 
 # 带变量的文案模板
@@ -174,6 +212,12 @@ EN_TEMPLATES = {
     '导入过程中发生错误: {e}': 'Error during import: {e}',
     'CSV解析失败: {e}': 'Failed to parse CSV: {e}',
     'CSV解析失败，请确认是支付宝账单格式: {e}': 'Failed to parse CSV. Please confirm Alipay bill format: {e}',
+    # 数据库加密
+    '账本 {path} 已加密，请输入密码：': 'The ledger {path} is encrypted. Enter password:',
+    '密码错误，还可重试 {n} 次': 'Wrong password. {n} attempt(s) left.',
+    '加密过程中发生错误: {e}': 'Error during encryption: {e}',
+    '解密过程中发生错误: {e}': 'Error during decryption: {e}',
+    '修改密码过程中发生错误: {e}': 'Error during password change: {e}',
 }
 
 _REV = {v: k for k, v in EN.items()}

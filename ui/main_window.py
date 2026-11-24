@@ -1,8 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font as tkfont
-from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog, PreviewDialog
+from ui.dialogs import FilterDialog, EditRecordDialog, ImportMappingDialog, PreviewDialog, PasswordDialog
 from ui.charts import show_monthly_chart, show_single_month_pie, show_pie
 from db.database import ensure_db, create_table, load_data, save_data
+from utils.crypto import (is_encrypted_file, encrypt_file, decrypt_file, decrypt_bytes,
+                          change_password_file, WrongPasswordError, CorruptFileError)
 from model.record_model import process_monthly, process_detail
 from ui.theme import pick_font_family, INCOME, EXPENSE, TOTAL_EXPENSE, ROW_STRIPE, TEXT_MUTED
 from utils.constants import DB_DEFAULT, CATEGORIES, TABLE_RECORDS_SCHEMA, TABLE_NAME, CJK_FONT_FALLBACK
@@ -13,6 +15,7 @@ import pandas as pd
 from tkcalendar import DateEntry
 import os
 import sqlite3
+import tempfile
 from datetime import datetime
 
 logger = get_logger(__name__)
@@ -37,6 +40,9 @@ class RecordBook:
         self.conn = None
         self.dirty = False  # 数据变更标志
         self.chart_window = None  # 图表窗口引用
+        # 加密状态：_temp_db 非空表示当前账本是加密库（sqlite 实际连接的是临时明文文件）
+        self._temp_db = None
+        self._password = None
         logger.info(f'初始化数据库: {self.db_path}')
         self.ensure_db()
         self.data = self.load_data()
@@ -55,8 +61,14 @@ class RecordBook:
         file_menu.add_command(label=_('保存'), command=self.save_data)
         file_menu.add_command(label=_('另存为'), command=self.save_as)
         file_menu.add_separator()
+        file_menu.add_command(label=_('加密当前账本'), command=self.encrypt_current_db)
+        file_menu.add_command(label=_('解密当前账本'), command=self.decrypt_current_db)
+        file_menu.add_command(label=_('修改密码'), command=self.change_db_password)
+        file_menu.add_separator()
         file_menu.add_command(label=_('退出'), command=self.on_close)
         menubar.add_cascade(label=_('文件'), menu=file_menu)
+        self.file_menu = file_menu
+        self._refresh_crypto_menu()
         # 导入菜单
         import_menu = tk.Menu(menubar, tearoff=0)
         import_menu.add_command(label='CSV', command=self.import_csv)
@@ -457,7 +469,14 @@ class RecordBook:
                 os.makedirs(db_dir, exist_ok=True)
             # 提示用户将新建数据库
             messagebox.showinfo(_('初始化数据库'), _t('将在以下位置新建数据库文件：\n{path}').format(path=self.db_path))
-        self.conn = sqlite3.connect(self.db_path)
+        # 默认库已被加密：先输密码解密到临时文件再连接
+        if os.path.exists(self.db_path) and is_encrypted_file(self.db_path):
+            password = self._ask_password_to_open(self.db_path)
+            if password is None:
+                raise SystemExit(_('未提供密码，无法打开加密账本'))
+            self._password = password
+            self._temp_db = self._decrypt_to_temp(self.db_path, password)
+        self.conn = sqlite3.connect(self._temp_db or self.db_path)
         self.create_table()
 
     def create_table(self):
@@ -497,6 +516,8 @@ class RecordBook:
             
             self.conn.commit()
             self.dirty = False
+            self._sync_encrypted_copy()
+            self._refresh_crypto_menu()
             logger.info(f'数据保存成功，共 {len(self.data)} 条记录')
             messagebox.showinfo(_('保存成功'), _('数据已成功保存！'))
         except sqlite3.Error as e:
@@ -542,14 +563,29 @@ class RecordBook:
             # 无论成功失败都关闭新库连接，避免连接泄漏
             if new_conn is not None:
                 new_conn.close()
+        # 当前是加密账本时，另存为的结果同样加密（沿用当前密码）
+        encrypted = self._temp_db is not None
+        password = self._password
+        if encrypted:
+            try:
+                encrypt_file(new_path, new_path, password)
+            except Exception as e:
+                logger.error(f'另存为后加密失败: {e}')
+                messagebox.showerror(_('保存失败'), _t('加密过程中发生错误: {e}').format(e=e))
+                return
+        self._drop_temp_db()  # 旧账本的临时明文文件不再需要
         self.db_path = new_path
+        if encrypted:
+            self._password = password
+            self._temp_db = self._decrypt_to_temp(new_path, password)
         self.conn.close()
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self._temp_db or self.db_path)
         messagebox.showinfo(_('另存为成功'), _t('数据已另存为 {path}').format(path=self.db_path))
         self.dirty = False
         self.data = self.load_data()
         self.refresh_table()
         self.update_db_path_display()
+        self._refresh_crypto_menu()
 
     def new_db(self):
         # 新建一个空数据库文件
@@ -562,12 +598,25 @@ class RecordBook:
         new_path = filedialog.asksaveasfilename(defaultextension='.db', filetypes=[(_('SQLite数据库'), '*.db')])
         if not new_path:
             return
-        # 关闭旧连接
+        # 可选：为新账本设置加密密码
+        password = None
+        if messagebox.askyesno(_('设置密码'), _('是否为该账本设置密码加密？')):
+            dialog = PasswordDialog(self.master, _('设置密码'), _('请输入密码：'),
+                                    confirm_label=_('再次输入密码：'), font=self.default_font)
+            self.master.wait_window(dialog)
+            if dialog.password is None:
+                return  # 用户取消密码设置，中止新建
+            password = dialog.password
+            if len(password) < 6 and not messagebox.askyesno(
+                    _('弱密码提示'), _('密码少于 6 位，安全性较低，仍要继续吗？')):
+                return
+        # 关闭旧连接并清理旧临时文件
         if self.conn:
             try:
                 self.conn.close()
             except Exception:
                 pass
+        self._drop_temp_db()
         # 创建新数据库并初始化表
         self.db_path = new_path
         db_dir = os.path.dirname(self.db_path)
@@ -575,11 +624,27 @@ class RecordBook:
             os.makedirs(db_dir, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.create_table()
+        self.conn.close()
+        if password:
+            # 创建即为密文：先加密落盘，再解密到临时文件继续工作
+            try:
+                encrypt_file(self.db_path, self.db_path, password)
+            except Exception as e:
+                logger.error(f'新建加密数据库失败: {e}')
+                messagebox.showerror(_('新建失败'), _t('加密过程中发生错误: {e}').format(e=e))
+                return
+            self._password = password
+            self._temp_db = self._decrypt_to_temp(self.db_path, password)
+            self.conn = sqlite3.connect(self._temp_db)
+            self.create_table()
+        else:
+            self.conn = sqlite3.connect(self.db_path)
         # 清空当前数据并刷新界面
         self.data = self.load_data()
         self.dirty = False
         self.refresh_table()
         self.update_db_path_display()
+        self._refresh_crypto_menu()
         messagebox.showinfo(_('新建成功'), _t('已创建新的数据库：{path}').format(path=self.db_path))
 
     def open_db(self):
@@ -598,21 +663,38 @@ class RecordBook:
         if not db_path:
             return
         try:
-            # 先尝试连接新数据库，成功后再关闭旧连接，避免切换失败导致状态损坏
-            new_conn = sqlite3.connect(db_path)
+            # 加密账本：输密码解密到临时文件，sqlite 连接临时文件
+            if is_encrypted_file(db_path):
+                password = self._ask_password_to_open(db_path)
+                if password is None:
+                    return
+                temp_db = self._decrypt_to_temp(db_path, password)
+                try:
+                    new_conn = sqlite3.connect(temp_db)
+                except sqlite3.Error:
+                    os.remove(temp_db)
+                    raise
+            else:
+                password, temp_db = None, None
+                # 先尝试连接新数据库，成功后再关闭旧连接，避免切换失败导致状态损坏
+                new_conn = sqlite3.connect(db_path)
         except sqlite3.Error as e:
             logger.error(f'打开数据库失败: {e}')
             messagebox.showerror(_('打开失败'), _t('无法打开数据库：{e}').format(e=e))
             return
         if self.conn:
             self.conn.close()
+        self._drop_temp_db()
         self.db_path = db_path
+        self._password = password
+        self._temp_db = temp_db
         self.conn = new_conn
         self.create_table()
         self.data = self.load_data()
         self.refresh_table()
         self.dirty = False
         self.update_db_path_display()
+        self._refresh_crypto_menu()
         messagebox.showinfo(_('打开成功'), _t('已打开数据库：{path}').format(path=self.db_path))
 
     def create_widgets(self):
@@ -808,6 +890,182 @@ class RecordBook:
         self.db_path_label.config(text=_t('当前数据库: {path}').format(path=display_path))
         # 添加悬浮提示显示完整路径
         self.db_path_label.tooltip_text = abs_path
+
+    # ---------- 数据库加密 ----------
+
+    def _decrypt_to_temp(self, path, password):
+        """把加密账本解密到系统临时文件，返回临时文件路径"""
+        fd, tmp_path = tempfile.mkstemp(suffix='.db', prefix='bookkeeping-')
+        os.close(fd)
+        decrypt_file(path, tmp_path, password)
+        return tmp_path
+
+    def _drop_temp_db(self):
+        """删除临时明文文件并清空加密状态（切换/关闭加密账本时调用）"""
+        if self._temp_db and os.path.exists(self._temp_db):
+            try:
+                os.remove(self._temp_db)
+            except OSError as e:
+                logger.warning(f'删除临时数据库文件失败: {e}')
+        self._temp_db = None
+        self._password = None
+
+    def _sync_encrypted_copy(self):
+        """加密账本保存后：把临时明文文件同步加密回用户可见的密文文件"""
+        if self._temp_db is None:
+            return
+        encrypt_file(self._temp_db, self.db_path, self._password)
+
+    def _ask_password_to_open(self, path, max_tries=5):
+        """打开加密账本时循环询问密码，最多 max_tries 次；取消或次数用尽返回 None"""
+        for attempt in range(1, max_tries + 1):
+            dialog = PasswordDialog(
+                self.master, _('输入密码'),
+                _t('账本 {path} 已加密，请输入密码：').format(path=os.path.basename(path)),
+                font=self.default_font)
+            self.master.wait_window(dialog)
+            if dialog.password is None:
+                return None
+            try:
+                with open(path, 'rb') as f:
+                    decrypt_bytes(f.read(), dialog.password)
+                return dialog.password
+            except WrongPasswordError:
+                if attempt < max_tries:
+                    messagebox.showerror(_('密码错误'), _t('密码错误，还可重试 {n} 次').format(n=max_tries - attempt))
+                else:
+                    messagebox.showerror(_('密码错误'), _('密码错误次数过多，已取消打开。'))
+            except CorruptFileError:
+                messagebox.showerror(_('文件损坏'), _('文件已损坏或不是有效的加密账本。'))
+                return None
+            except OSError as e:
+                messagebox.showerror(_('打开失败'), _t('无法读取文件: {e}').format(e=e))
+                return None
+        return None
+
+    def _prompt_new_password(self, title):
+        """弹出设置新密码对话框（含二次确认与弱密码提示），取消返回 None"""
+        dialog = PasswordDialog(self.master, title, _('请输入密码：'),
+                                confirm_label=_('再次输入密码：'), font=self.default_font)
+        self.master.wait_window(dialog)
+        if dialog.password is None:
+            return None
+        if len(dialog.password) < 6 and not messagebox.askyesno(
+                _('弱密码提示'), _('密码少于 6 位，安全性较低，仍要继续吗？')):
+            return None
+        return dialog.password
+
+    def _refresh_crypto_menu(self):
+        """按当前加密状态/未保存修改刷新加密菜单项可用性"""
+        if not hasattr(self, 'file_menu'):
+            return
+        encrypted = self._temp_db is not None
+        states = {
+            _('加密当前账本'): 'disabled' if (encrypted or self.dirty) else 'normal',
+            _('解密当前账本'): 'disabled' if (not encrypted or self.dirty) else 'normal',
+            _('修改密码'): 'disabled' if (not encrypted or self.dirty) else 'normal',
+        }
+        for label, state in states.items():
+            try:
+                self.file_menu.entryconfig(self.file_menu.index(label), state=state)
+            except tk.TclError:
+                pass
+
+    def encrypt_current_db(self):
+        """加密当前账本：原地加密后改为「临时明文 + 密文落盘」的工作方式"""
+        if self._temp_db is not None or self.dirty:
+            return
+        password = self._prompt_new_password(_('设置密码'))
+        if password is None:
+            return
+        if not messagebox.askyesno(
+                _('确认加密'),
+                _('加密后打开此账本需要输入密码。\n忘记密码将无法恢复数据，请牢记密码！\n\n确定继续吗？')):
+            return
+        try:
+            self.conn.close()
+            encrypt_file(self.db_path, self.db_path, password)
+            self._password = password
+            self._temp_db = self._decrypt_to_temp(self.db_path, password)
+            self.conn = sqlite3.connect(self._temp_db)
+            self.create_table()
+            self.data = self.load_data()
+            self.refresh_table()
+            self._refresh_crypto_menu()
+            logger.info(f'账本已加密: {self.db_path}')
+            messagebox.showinfo(_('加密成功'), _('加密成功！今后打开此账本需要输入密码，请牢记密码。'))
+        except Exception as e:
+            logger.exception('加密当前账本失败')
+            messagebox.showerror(_('加密失败'), _t('加密过程中发生错误: {e}').format(e=e))
+
+    def decrypt_current_db(self):
+        """解密当前账本：验证密码后恢复为明文文件"""
+        if self._temp_db is None or self.dirty:
+            return
+        dialog = PasswordDialog(self.master, _('输入密码'), _('请输入密码验证身份：'), font=self.default_font)
+        self.master.wait_window(dialog)
+        if dialog.password is None:
+            return
+        if not messagebox.askyesno(
+                _('确认解密'),
+                _('确定要解密当前账本吗？\n解密后任何人都可以直接查看账本数据。')):
+            return
+        try:
+            with open(self.db_path, 'rb') as f:
+                decrypt_bytes(f.read(), dialog.password)
+        except WrongPasswordError:
+            messagebox.showerror(_('密码错误'), _('密码错误，解密已取消。'))
+            return
+        except (CorruptFileError, OSError) as e:
+            messagebox.showerror(_('解密失败'), _t('解密过程中发生错误: {e}').format(e=e))
+            return
+        try:
+            self.conn.close()
+            temp_db, self._temp_db = self._temp_db, None
+            self._password = None
+            if temp_db and os.path.exists(temp_db):
+                os.remove(temp_db)
+            decrypt_file(self.db_path, self.db_path, dialog.password)
+            self.conn = sqlite3.connect(self.db_path)
+            self.create_table()
+            self.data = self.load_data()
+            self.refresh_table()
+            self._refresh_crypto_menu()
+            logger.info(f'账本已解密: {self.db_path}')
+            messagebox.showinfo(_('解密成功'), _('解密成功！此账本已恢复为未加密状态。'))
+        except Exception as e:
+            logger.exception('解密当前账本失败')
+            messagebox.showerror(_('解密失败'), _t('解密过程中发生错误: {e}').format(e=e))
+
+    def change_db_password(self):
+        """修改当前加密账本的密码"""
+        if self._temp_db is None or self.dirty:
+            return
+        dialog = PasswordDialog(self.master, _('修改密码'), _('请输入原密码：'), font=self.default_font)
+        self.master.wait_window(dialog)
+        if dialog.password is None:
+            return
+        old_password = dialog.password
+        try:
+            with open(self.db_path, 'rb') as f:
+                decrypt_bytes(f.read(), old_password)
+        except WrongPasswordError:
+            messagebox.showerror(_('密码错误'), _('密码错误，修改密码已取消。'))
+            return
+        except (CorruptFileError, OSError) as e:
+            messagebox.showerror(_('修改失败'), _t('修改密码过程中发生错误: {e}').format(e=e))
+            return
+        new_password = self._prompt_new_password(_('修改密码'))
+        if new_password is None:
+            return
+        try:
+            change_password_file(self.db_path, old_password, new_password)
+            self._password = new_password
+            logger.info(f'账本密码已修改: {self.db_path}')
+            messagebox.showinfo(_('密码修改成功'), _('密码修改成功！今后打开此账本需要使用新密码。'))
+        except Exception as e:
+            logger.exception('修改账本密码失败')
+            messagebox.showerror(_('修改失败'), _t('修改密码过程中发生错误: {e}').format(e=e))
 
     # 存储当前筛选条件
     def apply_filter(self, filter_dict=None):
@@ -1070,6 +1328,8 @@ class RecordBook:
                     logger.debug('数据库连接已关闭')
                 except Exception as e:
                     logger.warning(f'关闭数据库连接时出错: {e}')
+            # 清理加密账本的临时明文文件
+            self._drop_temp_db()
         except Exception as e:
             logger.error(f'退出清理时发生错误: {e}')
         finally:

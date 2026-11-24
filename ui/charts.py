@@ -3,9 +3,13 @@ from tkinter import ttk
 from tkinter import messagebox
 import pandas as pd
 
-from ui.theme import (BORDER, TEXT, TEXT_MUTED, INCOME, EXPENSE,
+from ui.theme import (BORDER, TEXT, TEXT_MUTED,
                       CHART_PALETTE, MPL_FONT_FALLBACK)
 from utils.i18n import _, _t
+
+# 图表专用配色：青翠绿（收入）与暖橙（支出），比全局文字色更明快
+CHART_INCOME = '#3FA37F'
+CHART_EXPENSE = '#E8833A'
 
 
 def __getattr__(name):
@@ -58,9 +62,9 @@ def show_monthly_chart(df, master):
     fig, ax = plt.subplots(figsize=(8,5))
     fig.patch.set_facecolor('white')  # 图表背景与窗口协调（设计稿 4.3）：纯白底
     x = range(len(months))
-    # 收入柱=INCOME 橄榄绿、支出柱=EXPENSE 墨色（设计稿 4.3）
-    ax.bar(x, income, width=0.4, label=_('收入'), align='center', color=INCOME)
-    ax.bar([i+0.4 for i in x], expense, width=0.4, label=_('支出'), align='center', color=EXPENSE)
+    # 收入柱=青翠绿、支出柱=暖橙（图表专用配色，明快易区分）
+    ax.bar(x, income, width=0.4, label=_('收入'), align='center', color=CHART_INCOME)
+    ax.bar([i+0.4 for i in x], expense, width=0.4, label=_('支出'), align='center', color=CHART_EXPENSE)
     ax.set_xticks([i+0.2 for i in x])
     ax.set_xticklabels(months, rotation=45)
     _style_axes(ax, grid=True)
